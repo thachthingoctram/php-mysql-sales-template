@@ -5,7 +5,11 @@ $pageTitle = 'Thêm sản phẩm';
 require_once '/var/www/src/config/database.php';
 
 $error = '';
+$success = '';
 
+/**
+ * Lấy danh sách danh mục
+ */
 $sqlCategories = "
     SELECT CategoryID, CategoryName
     FROM categories
@@ -14,6 +18,9 @@ $sqlCategories = "
 
 $categories = $conn->query($sqlCategories);
 
+/**
+ * Lấy danh sách nhà cung cấp
+ */
 $sqlSuppliers = "
     SELECT SupplierID, SupplierName
     FROM suppliers
@@ -22,6 +29,9 @@ $sqlSuppliers = "
 
 $suppliers = $conn->query($sqlSuppliers);
 
+/**
+ * Xử lý khi submit form
+ */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   $productCode = trim($_POST['product_code'] ?? '');
@@ -37,6 +47,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   $isActive = isset($_POST['is_active']) ? 1 : 0;
 
+  /**
+   * Nhận nhiều ảnh
+   */
+  $files = $_FILES['product_images'] ?? null;
+
+  /**
+   * Kiểm tra dữ liệu
+   */
   if ($productCode === '') {
 
     $error = 'Mã sản phẩm không được để trống.';
@@ -55,69 +73,314 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   } elseif ($supplierID <= 0) {
 
     $error = 'Vui lòng chọn nhà cung cấp.';
+  } elseif (
+    !$files
+    || !isset($files['name'])
+    || !is_array($files['name'])
+  ) {
+
+    $error = 'Vui lòng chọn ảnh sản phẩm.';
   } else {
 
-    $sql = "
-            INSERT INTO products
-            (
-                ProductCode,
-                ProductName,
-                Description,
-                Unit,
-                Price,
-                StockQuantity,
-                IsActive,
-                SupplierID,
-                CategoryID
-            )
-            VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ";
+    $fileCount = count($files['name']);
 
-    $stmt = $conn->prepare($sql);
+    /**
+     * Chỉ cho phép từ 1 đến 4 ảnh
+     */
+    if ($fileCount < 1 || $fileCount > 4) {
 
-    $stmt->bind_param(
-      'ssssdiiii',
-      $productCode,
-      $productName,
-      $description,
-      $unit,
-      $price,
-      $stockQuantity,
-      $isActive,
-      $supplierID,
-      $categoryID
-    );
+      $error = 'Vui lòng chọn từ 1 đến 4 ảnh.';
+    } else {
 
-    try {
+      $finfo = new finfo(FILEINFO_MIME_TYPE);
 
-      if ($stmt->execute()) {
-        $stmt->close();
+      $extensionMap = [
+        'image/jpeg' => 'jpg',
+        'image/png'  => 'png',
+        'image/webp' => 'webp'
+      ];
 
-        header('Location: /products/');
-        exit;
+      $validFiles = [];
+      $hasError = false;
+
+      /**
+       * Kiểm tra từng ảnh
+       */
+      for ($i = 0; $i < $fileCount; $i++) {
+
+        $fileName = $files['name'][$i] ?? '';
+        $tmpName = $files['tmp_name'][$i] ?? '';
+        $fileError = $files['error'][$i] ?? UPLOAD_ERR_NO_FILE;
+        $fileSize = $files['size'][$i] ?? 0;
+
+        /**
+         * Kiểm tra lỗi upload
+         */
+        if ($fileError !== UPLOAD_ERR_OK) {
+
+          $error =
+            'Ảnh thứ '
+            . ($i + 1)
+            . ' upload không thành công.';
+
+          $hasError = true;
+          break;
+        }
+
+        /**
+         * Kiểm tra dung lượng
+         */
+        if ($fileSize > 2 * 1024 * 1024) {
+
+          $error =
+            'Ảnh thứ '
+            . ($i + 1)
+            . ' vượt quá 2 MB.';
+
+          $hasError = true;
+          break;
+        }
+
+        /**
+         * Kiểm tra MIME thật
+         */
+        $mimeType = $finfo->file($tmpName);
+
+        if (!isset($extensionMap[$mimeType])) {
+
+          $error =
+            'Ảnh thứ '
+            . ($i + 1)
+            . ' không phải JPG, PNG hoặc WebP.';
+
+          $hasError = true;
+          break;
+        }
+
+        /**
+         * Lưu thông tin file hợp lệ
+         */
+        $validFiles[] = [
+          'tmp_name' => $tmpName,
+          'extension' => $extensionMap[$mimeType]
+        ];
       }
-    } catch (mysqli_sql_exception $e) {
 
-      if ($e->getCode() === 1062) {
-        $error = 'Mã sản phẩm đã tồn tại. Vui lòng nhập mã khác.';
-      } else {
-        $error = 'Không thể thêm sản phẩm.';
+      /**
+       * Nếu tất cả ảnh hợp lệ thì bắt đầu lưu
+       */
+      if (!$hasError) {
+
+        $savedFiles = [];
+
+        try {
+
+          /**
+           * Bắt đầu transaction
+           */
+          $conn->begin_transaction();
+
+          /**
+           * 1. Thêm sản phẩm
+           */
+          $sql = "
+                        INSERT INTO products
+                        (
+                            ProductCode,
+                            ProductName,
+                            Description,
+                            Unit,
+                            Price,
+                            StockQuantity,
+                            IsActive,
+                            SupplierID,
+                            CategoryID
+                        )
+                        VALUES
+                        (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ";
+
+          $stmt = $conn->prepare($sql);
+
+          $stmt->bind_param(
+            'ssssdiiii',
+            $productCode,
+            $productName,
+            $description,
+            $unit,
+            $price,
+            $stockQuantity,
+            $isActive,
+            $supplierID,
+            $categoryID
+          );
+
+          $stmt->execute();
+
+          /**
+           * 2. Lấy ProductID
+           */
+          $productID = $conn->insert_id;
+
+          $stmt->close();
+
+          /**
+           * 3. Chuẩn bị INSERT ảnh
+           */
+          $sqlImage = "
+                        INSERT INTO product_images
+                        (
+                            ProductID,
+                            ImageFile,
+                            AltText,
+                            IsPrimary,
+                            SortOrder
+                        )
+                        VALUES
+                        (?, ?, ?, ?, ?)
+                    ";
+
+          $stmtImage = $conn->prepare($sqlImage);
+
+          /**
+           * 4. Lưu từng ảnh
+           */
+          foreach ($validFiles as $index => $validFile) {
+
+            $extension = $validFile['extension'];
+
+            /**
+             * Tạo tên file mới
+             */
+            $newFileName =
+              'product-'
+              . bin2hex(random_bytes(8))
+              . '.'
+              . $extension;
+
+            /**
+             * Đường dẫn lưu file
+             */
+            $destination =
+              '/var/www/html/uploads/products/'
+              . $newFileName;
+
+            /**
+             * Di chuyển file
+             */
+            if (!move_uploaded_file(
+              $validFile['tmp_name'],
+              $destination
+            )) {
+
+              throw new Exception(
+                'Không thể lưu ảnh thứ '
+                  . ($index + 1)
+              );
+            }
+
+            /**
+             * Ghi nhận file đã lưu
+             */
+            $savedFiles[] = $destination;
+
+            /**
+             * Ảnh đầu tiên là ảnh chính
+             */
+            $isPrimary = ($index === 0) ? 1 : 0;
+
+            /**
+             * Thứ tự ảnh
+             */
+            $sortOrder = $index + 1;
+
+            /**
+             * Alt text
+             */
+            $altText =
+              $productName
+              . ' - ảnh '
+              . ($index + 1);
+
+            /**
+             * INSERT product_images
+             */
+            $stmtImage->bind_param(
+              'issii',
+              $productID,
+              $newFileName,
+              $altText,
+              $isPrimary,
+              $sortOrder
+            );
+
+            $stmtImage->execute();
+          }
+
+          $stmtImage->close();
+
+          /**
+           * 5. Hoàn tất transaction
+           */
+          $conn->commit();
+
+          /**
+           * Chuyển về danh sách sản phẩm
+           */
+          header('Location: /products/');
+          exit;
+        } catch (Throwable $e) {
+
+          /**
+           * Rollback database
+           */
+          $conn->rollback();
+
+          /**
+           * Xóa các file đã lưu
+           */
+          foreach ($savedFiles as $savedFile) {
+
+            if (file_exists($savedFile)) {
+              unlink($savedFile);
+            }
+          }
+
+          /**
+           * Xử lý lỗi trùng mã sản phẩm
+           */
+          if (
+            $e instanceof mysqli_sql_exception
+            && $e->getCode() === 1062
+          ) {
+
+            $error =
+              'Mã sản phẩm đã tồn tại. '
+              . 'Vui lòng nhập mã khác.';
+          } else {
+
+            $error =
+              'Không thể thêm sản phẩm: '
+              . $e->getMessage();
+          }
+        }
       }
-
-      $stmt->close();
     }
   }
 }
 
+/**
+ * Giao diện
+ */
 require_once '/var/www/src/includes/header.php';
 require_once '/var/www/src/includes/navbar.php';
-
 ?>
 
 <div class="container mt-4">
 
-  <h2 class="mb-4">Thêm sản phẩm</h2>
+  <h2 class="mb-4">
+    Thêm sản phẩm
+  </h2>
 
   <?php if ($error !== ''): ?>
 
@@ -127,12 +390,16 @@ require_once '/var/www/src/includes/navbar.php';
 
   <?php endif; ?>
 
-  <form method="post">
+  <form
+    method="post"
+    enctype="multipart/form-data">
 
     <!-- Mã sản phẩm -->
     <div class="mb-3">
 
-      <label for="productCode" class="form-label">
+      <label
+        for="productCode"
+        class="form-label">
         Mã sản phẩm
       </label>
 
@@ -141,7 +408,9 @@ require_once '/var/www/src/includes/navbar.php';
         class="form-control"
         id="productCode"
         name="product_code"
-        value="<?= htmlspecialchars($_POST['product_code'] ?? '') ?>"
+        value="<?= htmlspecialchars(
+                  $_POST['product_code'] ?? ''
+                ) ?>"
         required>
 
     </div>
@@ -149,7 +418,9 @@ require_once '/var/www/src/includes/navbar.php';
     <!-- Tên sản phẩm -->
     <div class="mb-3">
 
-      <label for="productName" class="form-label">
+      <label
+        for="productName"
+        class="form-label">
         Tên sản phẩm
       </label>
 
@@ -158,7 +429,9 @@ require_once '/var/www/src/includes/navbar.php';
         class="form-control"
         id="productName"
         name="product_name"
-        value="<?= htmlspecialchars($_POST['product_name'] ?? '') ?>"
+        value="<?= htmlspecialchars(
+                  $_POST['product_name'] ?? ''
+                ) ?>"
         required>
 
     </div>
@@ -166,7 +439,9 @@ require_once '/var/www/src/includes/navbar.php';
     <!-- Mô tả -->
     <div class="mb-3">
 
-      <label for="description" class="form-label">
+      <label
+        for="description"
+        class="form-label">
         Mô tả
       </label>
 
@@ -174,14 +449,18 @@ require_once '/var/www/src/includes/navbar.php';
         class="form-control"
         id="description"
         name="description"
-        rows="3"><?= htmlspecialchars($_POST['description'] ?? '') ?></textarea>
+        rows="3"><?= htmlspecialchars(
+                    $_POST['description'] ?? ''
+                  ) ?></textarea>
 
     </div>
 
     <!-- Đơn vị -->
     <div class="mb-3">
 
-      <label for="unit" class="form-label">
+      <label
+        for="unit"
+        class="form-label">
         Đơn vị
       </label>
 
@@ -190,14 +469,18 @@ require_once '/var/www/src/includes/navbar.php';
         class="form-control"
         id="unit"
         name="unit"
-        value="<?= htmlspecialchars($_POST['unit'] ?? '') ?>">
+        value="<?= htmlspecialchars(
+                  $_POST['unit'] ?? ''
+                ) ?>">
 
     </div>
 
     <!-- Giá -->
     <div class="mb-3">
 
-      <label for="price" class="form-label">
+      <label
+        for="price"
+        class="form-label">
         Giá
       </label>
 
@@ -208,7 +491,9 @@ require_once '/var/www/src/includes/navbar.php';
         name="price"
         min="0"
         step="0.01"
-        value="<?= htmlspecialchars($_POST['price'] ?? '') ?>"
+        value="<?= htmlspecialchars(
+                  $_POST['price'] ?? ''
+                ) ?>"
         required>
 
     </div>
@@ -216,7 +501,9 @@ require_once '/var/www/src/includes/navbar.php';
     <!-- Số lượng tồn kho -->
     <div class="mb-3">
 
-      <label for="stockQuantity" class="form-label">
+      <label
+        for="stockQuantity"
+        class="form-label">
         Số lượng tồn kho
       </label>
 
@@ -226,7 +513,9 @@ require_once '/var/www/src/includes/navbar.php';
         id="stockQuantity"
         name="stock_quantity"
         min="0"
-        value="<?= htmlspecialchars($_POST['stock_quantity'] ?? '0') ?>"
+        value="<?= htmlspecialchars(
+                  $_POST['stock_quantity'] ?? '0'
+                ) ?>"
         required>
 
     </div>
@@ -234,7 +523,9 @@ require_once '/var/www/src/includes/navbar.php';
     <!-- Danh mục -->
     <div class="mb-3">
 
-      <label for="categoryID" class="form-label">
+      <label
+        for="categoryID"
+        class="form-label">
         Danh mục
       </label>
 
@@ -244,17 +535,29 @@ require_once '/var/www/src/includes/navbar.php';
         name="category_id"
         required>
 
-        <option value="">-- Chọn danh mục --</option>
+        <option value="">
+          -- Chọn danh mục --
+        </option>
 
-        <?php while ($category = $categories->fetch_assoc()): ?>
+        <?php while (
+          $category = $categories->fetch_assoc()
+        ): ?>
 
           <option
             value="<?= $category['CategoryID'] ?>"
             <?= (
-              (int) ($_POST['category_id'] ?? 0)
-              === (int) $category['CategoryID']
-            ) ? 'selected' : '' ?>>
-            <?= htmlspecialchars($category['CategoryName']) ?>
+              (int) (
+                $_POST['category_id'] ?? 0
+              )
+              ===
+              (int) $category['CategoryID']
+            )
+              ? 'selected'
+              : ''
+            ?>>
+            <?= htmlspecialchars(
+              $category['CategoryName']
+            ) ?>
           </option>
 
         <?php endwhile; ?>
@@ -266,7 +569,9 @@ require_once '/var/www/src/includes/navbar.php';
     <!-- Nhà cung cấp -->
     <div class="mb-3">
 
-      <label for="supplierID" class="form-label">
+      <label
+        for="supplierID"
+        class="form-label">
         Nhà cung cấp
       </label>
 
@@ -276,22 +581,61 @@ require_once '/var/www/src/includes/navbar.php';
         name="supplier_id"
         required>
 
-        <option value="">-- Chọn nhà cung cấp --</option>
+        <option value="">
+          -- Chọn nhà cung cấp --
+        </option>
 
-        <?php while ($supplier = $suppliers->fetch_assoc()): ?>
+        <?php while (
+          $supplier = $suppliers->fetch_assoc()
+        ): ?>
 
           <option
             value="<?= $supplier['SupplierID'] ?>"
             <?= (
-              (int) ($_POST['supplier_id'] ?? 0)
-              === (int) $supplier['SupplierID']
-            ) ? 'selected' : '' ?>>
-            <?= htmlspecialchars($supplier['SupplierName']) ?>
+              (int) (
+                $_POST['supplier_id'] ?? 0
+              )
+              ===
+              (int) $supplier['SupplierID']
+            )
+              ? 'selected'
+              : ''
+            ?>>
+            <?= htmlspecialchars(
+              $supplier['SupplierName']
+            ) ?>
           </option>
 
         <?php endwhile; ?>
 
       </select>
+
+    </div>
+
+    <!-- Hình ảnh sản phẩm -->
+    <div class="mb-3">
+
+      <label
+        for="productImages"
+        class="form-label">
+        Hình ảnh sản phẩm
+      </label>
+
+      <input
+        type="file"
+        class="form-control"
+        id="productImages"
+        name="product_images[]"
+        accept="image/jpeg,image/png,image/webp"
+        multiple
+        required>
+
+      <div class="form-text">
+        Chọn từ 1 đến 4 ảnh.
+        Chấp nhận JPG, PNG hoặc WebP.
+        Mỗi ảnh tối đa 2 MB.
+        Ảnh đầu tiên là ảnh chính.
+      </div>
 
     </div>
 
@@ -304,9 +648,13 @@ require_once '/var/www/src/includes/navbar.php';
         id="isActive"
         name="is_active"
         value="1"
-        <?= isset($_POST['is_active']) || $_SERVER['REQUEST_METHOD'] !== 'POST'
+        <?= (
+          isset($_POST['is_active'])
+          || $_SERVER['REQUEST_METHOD'] !== 'POST'
+        )
           ? 'checked'
-          : '' ?>>
+          : ''
+        ?>>
 
       <label
         class="form-check-label"

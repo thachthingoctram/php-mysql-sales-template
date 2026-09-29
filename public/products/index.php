@@ -33,17 +33,20 @@ $result = $conn->query($sql);
 
 require_once '/var/www/src/includes/header.php';
 require_once '/var/www/src/includes/navbar.php';
-
 ?>
 
 <div class="container mt-4">
 
   <div class="d-flex justify-content-between align-items-center mb-3">
+
     <h2>Quản lý sản phẩm</h2>
 
-    <a href="/products/create.php" class="btn btn-primary">
+    <a
+      href="/products/create.php"
+      class="btn btn-primary">
       Thêm sản phẩm
     </a>
+
   </div>
 
   <div class="table-responsive">
@@ -51,61 +54,124 @@ require_once '/var/www/src/includes/navbar.php';
     <table class="table table-bordered table-striped align-middle">
 
       <thead class="table-dark">
+
         <tr>
+
           <th>Hình ảnh</th>
+
           <th>Mã SP</th>
+
           <th>Tên sản phẩm</th>
+
           <th>Danh mục</th>
+
           <th>Nhà cung cấp</th>
+
           <th>Đơn vị</th>
+
           <th>Giá</th>
+
           <th>Tồn kho</th>
+
           <th>Trạng thái</th>
+
           <th>Thao tác</th>
+
         </tr>
+
       </thead>
 
       <tbody>
 
         <?php while ($product = $result->fetch_assoc()): ?>
+
           <?php
           $imageFile = $product['ImageFile'] ?? '';
           $altText = $product['AltText'] ?? $product['ProductName'];
           ?>
 
-          <td>
-            <img
-              src="/uploads/products/<?= htmlspecialchars($imageFile) ?>"
-              alt="<?= htmlspecialchars($altText) ?>"
-              width="80"
-              class="img-thumbnail">
-          </td>
           <tr>
 
-            <td><?= htmlspecialchars($product['ProductCode']) ?></td>
+            <!-- Hình ảnh -->
 
-            <td><?= htmlspecialchars($product['ProductName']) ?></td>
+            <td>
 
-            <td><?= htmlspecialchars($product['CategoryName']) ?></td>
+              <?php if ($imageFile !== ''): ?>
 
-            <td><?= htmlspecialchars($product['SupplierName']) ?></td>
+                <img
+                  src="/uploads/products/<?= htmlspecialchars($imageFile) ?>"
+                  alt="<?= htmlspecialchars($altText) ?>"
+                  width="80"
+                  height="80"
+                  class="img-thumbnail">
 
-            <td><?= htmlspecialchars($product['Unit'] ?? '') ?></td>
+              <?php else: ?>
+
+                <span class="text-muted">
+                  Không có ảnh
+                </span>
+
+              <?php endif; ?>
+
+            </td>
+
+            <!-- Mã sản phẩm -->
+
+            <td>
+              <?= htmlspecialchars($product['ProductCode']) ?>
+            </td>
+
+            <!-- Tên sản phẩm -->
+
+            <td>
+              <?= htmlspecialchars($product['ProductName']) ?>
+            </td>
+
+            <!-- Danh mục -->
+
+            <td>
+              <?= htmlspecialchars($product['CategoryName'] ?? '') ?>
+            </td>
+
+            <!-- Nhà cung cấp -->
+
+            <td>
+              <?= htmlspecialchars($product['SupplierName'] ?? '') ?>
+            </td>
+
+            <!-- Đơn vị -->
+
+            <td>
+              <?= htmlspecialchars($product['Unit'] ?? '') ?>
+            </td>
+
+            <!-- Giá -->
 
             <td class="text-end">
+
               <?= number_format(
                 (float) $product['Price'],
                 0,
                 ',',
                 '.'
-              ) ?> đ
+              ) ?>
+
+              đ
+
             </td>
+
+            <!-- Tồn kho -->
 
             <td class="text-end">
+
               <?= (int) $product['StockQuantity'] ?>
+
             </td>
 
+            <!-- Trạng thái -->
+
             <td>
+
               <?php if ((int) $product['IsActive'] === 1): ?>
 
                 <span class="badge bg-success">
@@ -119,11 +185,19 @@ require_once '/var/www/src/includes/navbar.php';
                 </span>
 
               <?php endif; ?>
+
             </td>
 
+            <!-- Thao tác -->
+
             <td>
-              <a href="/products/edit.php?id=<?= $product['ProductID'] ?>" class="btn btn-sm btn-warning">
+
+              <a
+                href="/products/edit.php?id=<?= $product['ProductID'] ?>"
+                class="btn btn-sm btn-warning">
+
                 Sửa
+
               </a>
 
               <form
@@ -131,6 +205,7 @@ require_once '/var/www/src/includes/navbar.php';
                 method="post"
                 class="d-inline"
                 onsubmit="return confirm('Bạn có chắc muốn xóa sản phẩm này?');">
+
                 <input
                   type="hidden"
                   name="id"
@@ -139,9 +214,13 @@ require_once '/var/www/src/includes/navbar.php';
                 <button
                   type="submit"
                   class="btn btn-sm btn-danger">
+
                   Xóa
+
                 </button>
+
               </form>
+
             </td>
 
           </tr>
@@ -161,3 +240,5 @@ require_once '/var/www/src/includes/navbar.php';
 require_once '/var/www/src/includes/footer.php';
 
 $conn->close();
+
+?>
