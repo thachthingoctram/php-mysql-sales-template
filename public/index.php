@@ -1,4 +1,7 @@
 <?php
+
+require_once '/var/www/src/config/session.php';
+
 $pageTitle = 'Trang chủ';
 
 require_once '/var/www/src/includes/frontend/header.php';
@@ -7,11 +10,21 @@ require_once '/var/www/src/includes/frontend/navbar.php';
 
 <main class="container py-5">
 
-  <h1>Hệ thống quản lý bán hàng</h1>
+  <div class="text-center">
 
-  <p class="text-muted">
-    Ứng dụng PHP và MySQL đang hoạt động.
-  </p>
+    <h1>Chào mừng đến với Sales Store</h1>
+
+    <p class="text-muted">
+      Khám phá các sản phẩm hiện có tại cửa hàng.
+    </p>
+
+    <a
+      href="/products.php"
+      class="btn btn-primary">
+      Xem sản phẩm
+    </a>
+
+  </div>
 
 </main>
 

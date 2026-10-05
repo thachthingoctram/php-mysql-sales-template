@@ -1,5 +1,6 @@
 <?php
 
+require_once '/var/www/src/config/session.php';
 require_once '/var/www/src/config/database.php';
 
 $productID = isset($_GET['id'])
@@ -10,6 +11,7 @@ if ($productID <= 0) {
   header('Location: /products.php');
   exit;
 }
+
 $sql = "
     SELECT
         p.ProductID,
@@ -21,12 +23,10 @@ $sql = "
         p.StockQuantity,
         c.CategoryName,
         s.SupplierName
-
     FROM
         products p,
         categories c,
         suppliers s
-
     WHERE
         p.CategoryID = c.CategoryID
         AND p.SupplierID = s.SupplierID
@@ -54,18 +54,68 @@ if (!$product) {
   header('Location: /products.php');
   exit;
 }
+
+
+/*
+ * Xử lý thêm sản phẩm vào giỏ hàng
+ */
+
+$cartMessage = '';
+
+if (
+  $_SERVER['REQUEST_METHOD'] === 'POST'
+  && isset($_POST['add_to_cart'])
+) {
+
+  $quantity = isset($_POST['quantity'])
+    ? (int) $_POST['quantity']
+    : 1;
+
+  if ($quantity < 1) {
+    $quantity = 1;
+  }
+
+  $stockQuantity =
+    (int) $product['StockQuantity'];
+
+  if ($stockQuantity <= 0) {
+
+    $cartMessage =
+      'Sản phẩm hiện đã hết hàng.';
+  } else {
+
+    $currentQuantity =
+      $_SESSION['cart'][$productID] ?? 0;
+
+    $newQuantity =
+      $currentQuantity + $quantity;
+
+    if ($newQuantity > $stockQuantity) {
+      $newQuantity = $stockQuantity;
+    }
+
+    $_SESSION['cart'][$productID] =
+      $newQuantity;
+
+    $cartMessage =
+      'Đã thêm sản phẩm vào giỏ hàng.';
+  }
+}
+
+
+/*
+ * Lấy danh sách hình ảnh
+ */
+
 $sqlImages = "
     SELECT
         ProductImageID,
         ImageFile,
         IsPrimary
-
     FROM
         product_images
-
     WHERE
         ProductID = ?
-
     ORDER BY
         IsPrimary DESC,
         ProductImageID ASC
@@ -90,12 +140,15 @@ while ($image = $imageResult->fetch_assoc()) {
 
 $imageResult->free();
 $stmtImages->close();
+
+
 $pageTitle = $product['ProductName'];
 
 require_once '/var/www/src/includes/frontend/header.php';
 require_once '/var/www/src/includes/frontend/navbar.php';
+
 ?>
-?>
+
 <main class="container py-5">
 
   <div class="mb-4">
@@ -110,6 +163,8 @@ require_once '/var/www/src/includes/frontend/navbar.php';
 
   <div class="row g-5">
 
+    <!-- Hình ảnh sản phẩm -->
+
     <div class="col-lg-6">
 
       <?php if (!empty($images)): ?>
@@ -122,16 +177,12 @@ require_once '/var/www/src/includes/frontend/navbar.php';
           style="height: 420px;">
 
           <img
-            src="/uploads/products/<?=
-                                    htmlspecialchars(
+            src="/uploads/products/<?= htmlspecialchars(
                                       $images[0]['ImageFile']
-                                    )
-                                    ?>"
-            alt="<?=
-                  htmlspecialchars(
+                                    ) ?>"
+            alt="<?= htmlspecialchars(
                     $product['ProductName']
-                  )
-                  ?>"
+                  ) ?>"
             style="
                             width: 100%;
                             height: 100%;
@@ -158,16 +209,12 @@ require_once '/var/www/src/includes/frontend/navbar.php';
                   style="height: 120px;">
 
                   <img
-                    src="/uploads/products/<?=
-                                            htmlspecialchars(
+                    src="/uploads/products/<?= htmlspecialchars(
                                               $image['ImageFile']
-                                            )
-                                            ?>"
-                    alt="<?=
-                          htmlspecialchars(
+                                            ) ?>"
+                    alt="<?= htmlspecialchars(
                             $product['ProductName']
-                          )
-                          ?>"
+                          ) ?>"
                     style="
                                             width: 100%;
                                             height: 100%;
@@ -199,42 +246,37 @@ require_once '/var/www/src/includes/frontend/navbar.php';
 
     </div>
 
+
+    <!-- Thông tin sản phẩm -->
+
     <div class="col-lg-6">
 
       <p class="text-muted mb-2">
-        <?=
-        htmlspecialchars(
+        <?= htmlspecialchars(
           $product['CategoryName']
-        )
-        ?>
+        ) ?>
       </p>
 
       <h1 class="mb-3">
-        <?=
-        htmlspecialchars(
+        <?= htmlspecialchars(
           $product['ProductName']
-        )
-        ?>
+        ) ?>
       </h1>
 
       <p class="text-muted">
         Mã sản phẩm:
-        <?=
-        htmlspecialchars(
+        <?= htmlspecialchars(
           $product['ProductCode']
-        )
-        ?>
+        ) ?>
       </p>
 
       <p class="fs-3 fw-bold">
-        <?=
-        number_format(
+        <?= number_format(
           (float) $product['Price'],
           0,
           ',',
           '.'
-        )
-        ?> đ
+        ) ?> đ
       </p>
 
       <hr>
@@ -246,36 +288,33 @@ require_once '/var/www/src/includes/frontend/navbar.php';
         </dt>
 
         <dd class="col-sm-8">
-          <?=
-          htmlspecialchars(
+          <?= htmlspecialchars(
             $product['CategoryName']
-          )
-          ?>
+          ) ?>
         </dd>
+
 
         <dt class="col-sm-4">
           Nhà cung cấp
         </dt>
 
         <dd class="col-sm-8">
-          <?=
-          htmlspecialchars(
+          <?= htmlspecialchars(
             $product['SupplierName']
-          )
-          ?>
+          ) ?>
         </dd>
+
 
         <dt class="col-sm-4">
           Đơn vị tính
         </dt>
 
         <dd class="col-sm-8">
-          <?=
-          htmlspecialchars(
+          <?= htmlspecialchars(
             $product['Unit'] ?? ''
-          )
-          ?>
+          ) ?>
         </dd>
+
 
         <dt class="col-sm-4">
           Tồn kho
@@ -287,20 +326,94 @@ require_once '/var/www/src/includes/frontend/navbar.php';
 
       </dl>
 
-      <?php if (!empty($product['Description'])): ?>
+
+      <!-- Thông báo giỏ hàng -->
+
+      <?php if ($cartMessage !== ''): ?>
+
+        <div class="alert alert-info">
+          <?= htmlspecialchars($cartMessage) ?>
+        </div>
+
+      <?php endif; ?>
+
+
+      <!-- Thêm vào giỏ hàng -->
+
+      <?php if (
+        (int) $product['StockQuantity'] > 0
+      ): ?>
+
+        <form
+          method="post"
+          class="mb-4">
+
+          <div
+            class="row g-3
+                               align-items-end">
+
+            <div class="col-auto">
+
+              <label
+                for="quantity"
+                class="form-label">
+                Số lượng
+              </label>
+
+              <input
+                type="number"
+                name="quantity"
+                id="quantity"
+                class="form-control"
+                value="1"
+                min="1"
+                max="<?= (int) $product['StockQuantity'] ?>"
+                style="width: 100px;">
+
+            </div>
+
+            <div class="col-auto">
+
+              <button
+                type="submit"
+                name="add_to_cart"
+                class="btn btn-primary">
+                Thêm vào giỏ hàng
+              </button>
+
+            </div>
+
+          </div>
+
+        </form>
+
+      <?php else: ?>
+
+        <div class="alert alert-warning">
+          Sản phẩm hiện đã hết hàng.
+        </div>
+
+      <?php endif; ?>
+
+
+      <!-- Mô tả -->
+
+      <?php if (
+        !empty($product['Description'])
+      ): ?>
 
         <hr>
 
-        <h5>Mô tả sản phẩm</h5>
+        <h5>
+          Mô tả sản phẩm
+        </h5>
 
         <p>
-          <?=
-          nl2br(
+          <?= nl2br(
             htmlspecialchars(
               $product['Description']
             )
-          )
-          ?>
+          ) ?>
         </p>
 
       <?php endif; ?>
@@ -312,4 +425,7 @@ require_once '/var/www/src/includes/frontend/navbar.php';
 </main>
 
 <?php
+
 require_once '/var/www/src/includes/frontend/footer.php';
+
+?>
