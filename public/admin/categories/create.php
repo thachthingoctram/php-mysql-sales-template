@@ -31,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($stmt->execute()) {
 
-      header('Location: /categories/');
+      header('Location: /admin/categories/');
       exit;
     } else {
 
@@ -42,8 +42,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   }
 }
 
-require_once '/var/www/src/includes/header.php';
-require_once '/var/www/src/includes/navbar.php';
+require_once '/var/www/src/includes/admin/header.php';
+require_once '/var/www/src/includes/admin/navbar.php';
 ?>
 <div class="container mt-4">
 
@@ -88,7 +88,7 @@ require_once '/var/www/src/includes/navbar.php';
       Lưu
     </button>
 
-    <a href="/categories/" class="btn btn-secondary">
+    <a href="/admin/categories/" class="btn btn-secondary">
       Hủy
     </a>
 
@@ -98,4 +98,4 @@ require_once '/var/www/src/includes/navbar.php';
 
 <?php
 
-require_once '/var/www/src/includes/footer.php';
+require_once '/var/www/src/includes/admin/footer.php';

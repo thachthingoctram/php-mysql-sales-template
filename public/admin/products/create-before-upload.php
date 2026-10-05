@@ -94,7 +94,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if ($stmt->execute()) {
         $stmt->close();
 
-        header('Location: /products/');
+        header('Location: /admin/products/');
         exit;
       }
     } catch (mysqli_sql_exception $e) {
@@ -110,8 +110,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   }
 }
 
-require_once '/var/www/src/includes/header.php';
-require_once '/var/www/src/includes/navbar.php';
+require_once '/var/www/src/includes/admin/header.php';
+require_once '/var/www/src/includes/admin/navbar.php';
 
 ?>
 
@@ -324,7 +324,7 @@ require_once '/var/www/src/includes/navbar.php';
     </button>
 
     <a
-      href="/products/"
+      href="/admin/products/"
       class="btn btn-secondary">
       Hủy
     </a>
@@ -335,7 +335,7 @@ require_once '/var/www/src/includes/navbar.php';
 
 <?php
 
-require_once '/var/www/src/includes/footer.php';
+require_once '/var/www/src/includes/admin/footer.php';
 
 $conn->close();
 
