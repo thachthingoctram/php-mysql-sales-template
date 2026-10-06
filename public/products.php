@@ -3,46 +3,19 @@
 require_once '/var/www/src/config/session.php';
 require_once '/var/www/src/config/database.php';
 
-/*
-|--------------------------------------------------------------------------
-| Lấy danh sách danh mục
-|--------------------------------------------------------------------------
-*/
-
-$sqlCategories = "
-    SELECT
-        CategoryID,
-        CategoryName
-    FROM categories
-    ORDER BY CategoryName
-";
-
-$categoryResult = $conn->query($sqlCategories);
-
-$categories = [];
-
-if ($categoryResult) {
-
-    while ($category = $categoryResult->fetch_assoc()) {
-        $categories[] = $category;
-    }
-
-    $categoryResult->free();
-}
+$pageTitle = 'Sản phẩm';
 
 /*
 |--------------------------------------------------------------------------
-| Nhận tham số tìm kiếm
+| Nhận tham số tìm kiếm và lọc
 |--------------------------------------------------------------------------
 */
+
+$search = trim($_GET['search'] ?? '');
 
 $categoryID = isset($_GET['category'])
     ? (int) $_GET['category']
     : 0;
-
-$keyword = isset($_GET['keyword'])
-    ? trim($_GET['keyword'])
-    : '';
 
 $page = isset($_GET['page'])
     ? (int) $_GET['page']
@@ -52,9 +25,93 @@ if ($page < 1) {
     $page = 1;
 }
 
-$itemsPerPage = 6;
+/*
+|--------------------------------------------------------------------------
+| Số sản phẩm trên một trang
+|--------------------------------------------------------------------------
+*/
 
-$searchKeyword = '%' . $keyword . '%';
+$perPage = 8;
+
+/*
+|--------------------------------------------------------------------------
+| Lấy danh sách danh mục
+|--------------------------------------------------------------------------
+*/
+
+$categories = [];
+
+$sqlCategories = "
+    SELECT
+        CategoryID,
+        CategoryName
+    FROM categories
+    ORDER BY CategoryName ASC
+";
+
+$resultCategories = $conn->query($sqlCategories);
+
+if ($resultCategories) {
+
+    while ($row = $resultCategories->fetch_assoc()) {
+        $categories[] = $row;
+    }
+
+    $resultCategories->free();
+}
+
+/*
+|--------------------------------------------------------------------------
+| Xây dựng điều kiện tìm kiếm
+|--------------------------------------------------------------------------
+*/
+
+$where = [
+    "p.IsActive = 1"
+];
+
+$params = [];
+$types = '';
+
+/*
+|--------------------------------------------------------------------------
+| Tìm kiếm theo tên hoặc mã sản phẩm
+|--------------------------------------------------------------------------
+*/
+
+if ($search !== '') {
+
+    $where[] = "
+        (
+            p.ProductName LIKE ?
+            OR p.ProductCode LIKE ?
+        )
+    ";
+
+    $searchValue = '%' . $search . '%';
+
+    $params[] = $searchValue;
+    $params[] = $searchValue;
+
+    $types .= 'ss';
+}
+
+/*
+|--------------------------------------------------------------------------
+| Lọc theo danh mục
+|--------------------------------------------------------------------------
+*/
+
+if ($categoryID > 0) {
+
+    $where[] = "p.CategoryID = ?";
+
+    $params[] = $categoryID;
+
+    $types .= 'i';
+}
+
+$whereSQL = implode(' AND ', $where);
 
 /*
 |--------------------------------------------------------------------------
@@ -63,64 +120,27 @@ $searchKeyword = '%' . $keyword . '%';
 */
 
 $sqlCount = "
-    SELECT
-        COUNT(*) AS TotalProducts
+    SELECT COUNT(*) AS TotalProducts
     FROM products p
-    INNER JOIN categories c
-        ON p.CategoryID = c.CategoryID
-    WHERE p.IsActive = 1
+    WHERE {$whereSQL}
 ";
-
-$countTypes = '';
-$countParams = [];
-
-if ($categoryID > 0) {
-
-    $sqlCount .= "
-        AND p.CategoryID = ?
-    ";
-
-    $countTypes .= 'i';
-    $countParams[] = $categoryID;
-}
-
-if ($keyword !== '') {
-
-    $sqlCount .= "
-        AND (
-            p.ProductName LIKE ?
-            OR p.ProductCode LIKE ?
-        )
-    ";
-
-    $countTypes .= 'ss';
-    $countParams[] = $searchKeyword;
-    $countParams[] = $searchKeyword;
-}
 
 $stmtCount = $conn->prepare($sqlCount);
 
-if (!$stmtCount) {
-    die('Lỗi chuẩn bị truy vấn đếm sản phẩm: ' . $conn->error);
-}
-
-if (!empty($countParams)) {
-    $stmtCount->bind_param(
-        $countTypes,
-        ...$countParams
-    );
+if (!empty($params)) {
+    $stmtCount->bind_param($types, ...$params);
 }
 
 $stmtCount->execute();
 
-$countResult = $stmtCount->get_result();
+$resultCount = $stmtCount->get_result();
 
-$countRow = $countResult->fetch_assoc();
+$countRow = $resultCount->fetch_assoc();
+
+$resultCount->free();
+$stmtCount->close();
 
 $totalProducts = (int) ($countRow['TotalProducts'] ?? 0);
-
-$countResult->free();
-$stmtCount->close();
 
 /*
 |--------------------------------------------------------------------------
@@ -128,15 +148,13 @@ $stmtCount->close();
 |--------------------------------------------------------------------------
 */
 
-$totalPages = (int) ceil(
-    $totalProducts / $itemsPerPage
-);
+$totalPages = (int) ceil($totalProducts / $perPage);
 
 if ($totalPages > 0 && $page > $totalPages) {
     $page = $totalPages;
 }
 
-$offset = ($page - 1) * $itemsPerPage;
+$offset = ($page - 1) * $perPage;
 
 /*
 |--------------------------------------------------------------------------
@@ -144,13 +162,18 @@ $offset = ($page - 1) * $itemsPerPage;
 |--------------------------------------------------------------------------
 */
 
-$sql = "
+$products = [];
+
+$sqlProducts = "
     SELECT
         p.ProductID,
         p.ProductCode,
         p.ProductName,
+        p.Description,
+        p.Unit,
         p.Price,
         p.StockQuantity,
+        p.CategoryID,
         c.CategoryName,
 
         (
@@ -164,70 +187,86 @@ $sql = "
 
     FROM products p
 
-    INNER JOIN categories c
-        ON p.CategoryID = c.CategoryID
+    LEFT JOIN categories c
+        ON c.CategoryID = p.CategoryID
 
-    WHERE p.IsActive = 1
-";
+    WHERE {$whereSQL}
 
-$types = '';
-$params = [];
-
-if ($categoryID > 0) {
-
-    $sql .= "
-        AND p.CategoryID = ?
-    ";
-
-    $types .= 'i';
-    $params[] = $categoryID;
-}
-
-if ($keyword !== '') {
-
-    $sql .= "
-        AND (
-            p.ProductName LIKE ?
-            OR p.ProductCode LIKE ?
-        )
-    ";
-
-    $types .= 'ss';
-    $params[] = $searchKeyword;
-    $params[] = $searchKeyword;
-}
-
-$sql .= "
     ORDER BY p.ProductID DESC
+
     LIMIT ? OFFSET ?
 ";
 
-$types .= 'ii';
-$params[] = $itemsPerPage;
-$params[] = $offset;
-
-$stmt = $conn->prepare($sql);
-
-if (!$stmt) {
-    die('Lỗi chuẩn bị truy vấn sản phẩm: ' . $conn->error);
-}
-
-$stmt->bind_param(
-    $types,
-    ...$params
-);
-
-$stmt->execute();
-
-$result = $stmt->get_result();
+$stmtProducts = $conn->prepare($sqlProducts);
 
 /*
 |--------------------------------------------------------------------------
-| Tiêu đề trang
+| Bind tham số
+|--------------------------------------------------------------------------
+|
+| Nếu có tìm kiếm/lọc:
+|   $types = ss hoặc ssi...
+|
+| Cuối cùng thêm:
+|   LIMIT = integer
+|   OFFSET = integer
 |--------------------------------------------------------------------------
 */
 
-$pageTitle = 'Sản phẩm';
+$productTypes = $types . 'ii';
+
+$productParams = $params;
+
+$productParams[] = $perPage;
+$productParams[] = $offset;
+
+$stmtProducts->bind_param(
+    $productTypes,
+    ...$productParams
+);
+
+$stmtProducts->execute();
+
+$resultProducts = $stmtProducts->get_result();
+
+while ($row = $resultProducts->fetch_assoc()) {
+    $products[] = $row;
+}
+
+$resultProducts->free();
+$stmtProducts->close();
+
+/*
+|--------------------------------------------------------------------------
+| Hàm tạo URL phân trang
+|--------------------------------------------------------------------------
+*/
+
+function buildProductUrl($page)
+{
+    $query = [];
+
+    if (isset($_GET['search']) && trim($_GET['search']) !== '') {
+        $query['search'] = trim($_GET['search']);
+    }
+
+    if (
+        isset($_GET['category'])
+        && (int) $_GET['category'] > 0
+    ) {
+        $query['category'] = (int) $_GET['category'];
+    }
+
+    $query['page'] = $page;
+
+    return '/products.php?' . http_build_query($query);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Frontend
+|--------------------------------------------------------------------------
+*/
 
 require_once '/var/www/src/includes/frontend/header.php';
 require_once '/var/www/src/includes/frontend/navbar.php';
@@ -240,253 +279,350 @@ require_once '/var/www/src/includes/frontend/navbar.php';
 
     <div class="mb-4">
 
-        <h1>Sản phẩm</h1>
+        <h1 class="mb-2">
+            Sản phẩm
+        </h1>
 
-        <p class="text-muted">
-            Khám phá các sản phẩm hiện có tại cửa hàng.
+        <p class="text-muted mb-0">
+            Danh sách sản phẩm đang được kinh doanh.
         </p>
 
     </div>
 
+
     <!-- Tìm kiếm và lọc -->
 
-    <form
-        method="get"
-        action="/products.php"
-        class="row g-3 mb-4"
+    <div class="card shadow-sm mb-4">
+
+        <div class="card-body">
+
+            <form
+                method="get"
+                action="/products.php"
+            >
+
+                <div class="row g-3 align-items-end">
+
+                    <!-- Tìm kiếm -->
+
+                    <div class="col-md-6">
+
+                        <label
+                            for="search"
+                            class="form-label"
+                        >
+                            Tìm kiếm
+                        </label>
+
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="search"
+                            name="search"
+                            value="<?= htmlspecialchars($search) ?>"
+                            placeholder="Tên hoặc mã sản phẩm"
+                        >
+
+                    </div>
+
+
+                    <!-- Danh mục -->
+
+                    <div class="col-md-4">
+
+                        <label
+                            for="category"
+                            class="form-label"
+                        >
+                            Danh mục
+                        </label>
+
+                        <select
+                            class="form-select"
+                            id="category"
+                            name="category"
+                        >
+
+                            <option value="0">
+                                Tất cả danh mục
+                            </option>
+
+                            <?php foreach ($categories as $category): ?>
+
+                                <option
+                                    value="<?= (int) $category['CategoryID'] ?>"
+                                    <?= (
+                                        $categoryID
+                                        === (int) $category['CategoryID']
+                                    )
+                                        ? 'selected'
+                                        : ''
+                                    ?>
+                                >
+
+                                    <?= htmlspecialchars(
+                                        $category['CategoryName']
+                                    ) ?>
+
+                                </option>
+
+                            <?php endforeach; ?>
+
+                        </select>
+
+                    </div>
+
+
+                    <!-- Nút tìm kiếm -->
+
+                    <div class="col-md-2">
+
+                        <button
+                            type="submit"
+                            class="btn btn-primary w-100"
+                        >
+                            Tìm kiếm
+                        </button>
+
+                    </div>
+
+                </div>
+
+            </form>
+
+        </div>
+
+    </div>
+
+
+    <!-- Thông tin kết quả -->
+
+    <div
+        class="d-flex
+               justify-content-between
+               align-items-center
+               mb-3"
     >
 
-        <div class="col-md-6 col-lg-4">
+        <div class="text-muted">
 
-            <label
-                for="keyword"
-                class="form-label"
-            >
-                Tìm sản phẩm
-            </label>
+            <?php if ($totalProducts > 0): ?>
 
-            <input
-                type="text"
-                name="keyword"
-                id="keyword"
-                class="form-control"
-                value="<?= htmlspecialchars($keyword) ?>"
-                placeholder="Nhập tên hoặc mã sản phẩm"
-            >
+                Tìm thấy
+                <strong>
+                    <?= $totalProducts ?>
+                </strong>
+                sản phẩm.
+
+            <?php else: ?>
+
+                Không tìm thấy sản phẩm.
+
+            <?php endif; ?>
 
         </div>
 
-        <div class="col-md-6 col-lg-4">
+    </div>
 
-            <label
-                for="category"
-                class="form-label"
-            >
-                Danh mục
-            </label>
-
-            <select
-                name="category"
-                id="category"
-                class="form-select"
-            >
-
-                <option value="0">
-                    Tất cả danh mục
-                </option>
-
-                <?php foreach ($categories as $category): ?>
-
-                    <option
-                        value="<?= (int) $category['CategoryID'] ?>"
-                        <?=
-                            $categoryID ===
-                            (int) $category['CategoryID']
-                                ? 'selected'
-                                : ''
-                        ?>
-                    >
-                        <?=
-                            htmlspecialchars(
-                                $category['CategoryName']
-                            )
-                        ?>
-                    </option>
-
-                <?php endforeach; ?>
-
-            </select>
-
-        </div>
-
-        <div class="col-md-auto align-self-end">
-
-            <button
-                type="submit"
-                class="btn btn-primary"
-            >
-                Tìm kiếm
-            </button>
-
-            <a
-                href="/products.php"
-                class="btn btn-outline-secondary"
-            >
-                Xóa bộ lọc
-            </a>
-
-        </div>
-
-    </form>
-
-    <!-- Tổng số kết quả -->
-
-    <p class="text-muted">
-
-        Tìm thấy
-
-        <strong>
-            <?= $totalProducts ?>
-        </strong>
-
-        sản phẩm.
-
-    </p>
 
     <!-- Danh sách sản phẩm -->
 
-    <?php if ($result->num_rows > 0): ?>
+    <?php if (empty($products)): ?>
+
+        <div class="alert alert-info">
+
+            Không có sản phẩm phù hợp với điều kiện tìm kiếm.
+
+        </div>
+
+    <?php else: ?>
 
         <div class="row g-4">
 
-            <?php while ($product = $result->fetch_assoc()): ?>
+            <?php foreach ($products as $product): ?>
 
-                <div class="col-md-6 col-lg-4">
+                <div class="col-12 col-sm-6 col-lg-3">
 
-                    <div class="card h-100">
+                    <div class="card h-100 shadow-sm">
 
                         <!-- Hình ảnh -->
 
-                        <?php if (!empty($product['ImageFile'])): ?>
+                        <div
+                            class="p-3
+                                   d-flex
+                                   align-items-center
+                                   justify-content-center"
+                            style="
+                                height: 220px;
+                                background: #f8f9fa;
+                            "
+                        >
 
-                            <div
-                                class="bg-light d-flex
-                                       align-items-center
-                                       justify-content-center
-                                       p-3"
-                                style="height: 260px;"
-                            >
+                            <?php if (!empty($product['ImageFile'])): ?>
 
                                 <img
-                                    src="/uploads/products/<?=
-                                        htmlspecialchars(
-                                            $product['ImageFile']
-                                        )
-                                    ?>"
-                                    alt="<?=
-                                        htmlspecialchars(
-                                            $product['ProductName']
-                                        )
-                                    ?>"
+                                    src="/uploads/products/<?= htmlspecialchars(
+                                        $product['ImageFile']
+                                    ) ?>"
+                                    alt="<?= htmlspecialchars(
+                                        $product['ProductName']
+                                    ) ?>"
+                                    class="img-fluid"
                                     style="
-                                        width: 100%;
-                                        height: 100%;
+                                        max-height: 190px;
                                         object-fit: contain;
                                     "
                                 >
 
-                            </div>
+                            <?php else: ?>
 
-                        <?php else: ?>
+                                <div class="text-muted">
+                                    Chưa có hình ảnh
+                                </div>
 
-                            <div
-                                class="bg-light d-flex
-                                       align-items-center
-                                       justify-content-center
-                                       text-muted"
-                                style="height: 260px;"
-                            >
-                                Chưa có hình ảnh
-                            </div>
+                            <?php endif; ?>
 
-                        <?php endif; ?>
+                        </div>
+
 
                         <!-- Thông tin -->
 
                         <div class="card-body d-flex flex-column">
 
-                            <p class="text-muted small mb-1">
+                            <!-- Mã sản phẩm -->
 
-                                <?=
-                                    htmlspecialchars(
-                                        $product['CategoryName']
-                                    )
-                                ?>
+                            <div class="small text-muted mb-1">
 
-                            </p>
+                                <?= htmlspecialchars(
+                                    $product['ProductCode']
+                                ) ?>
 
-                            <h5 class="card-title">
+                            </div>
 
-                                <?=
-                                    htmlspecialchars(
-                                        $product['ProductName']
-                                    )
-                                ?>
 
-                            </h5>
+                            <!-- Tên -->
 
-                            <p class="text-muted small">
+                            <h2 class="h5">
 
-                                Mã sản phẩm:
+                                <?= htmlspecialchars(
+                                    $product['ProductName']
+                                ) ?>
 
-                                <?=
-                                    htmlspecialchars(
-                                        $product['ProductCode']
-                                    )
-                                ?>
+                            </h2>
 
-                            </p>
 
-                            <p class="fw-bold fs-5 mb-2">
+                            <!-- Danh mục -->
 
-                                <?=
-                                    number_format(
+                            <?php if (!empty($product['CategoryName'])): ?>
+
+                                <div class="mb-2">
+
+                                    <span class="badge bg-secondary">
+
+                                        <?= htmlspecialchars(
+                                            $product['CategoryName']
+                                        ) ?>
+
+                                    </span>
+
+                                </div>
+
+                            <?php endif; ?>
+
+
+                            <!-- Mô tả -->
+
+                            <?php if (!empty($product['Description'])): ?>
+
+                                <p class="text-muted small">
+
+                                    <?= htmlspecialchars(
+                                        mb_strimwidth(
+                                            $product['Description'],
+                                            0,
+                                            100,
+                                            '...'
+                                        )
+                                    ) ?>
+
+                                </p>
+
+                            <?php endif; ?>
+
+
+                            <!-- Giá -->
+
+                            <div class="mt-auto">
+
+                                <div class="fs-5 fw-bold text-primary">
+
+                                    <?= number_format(
                                         (float) $product['Price'],
                                         0,
                                         ',',
                                         '.'
-                                    )
-                                ?> đ
+                                    ) ?>
 
-                            </p>
+                                    đ
 
-                            <p class="small mb-3">
+                                </div>
 
-                                <?php if ((int) $product['StockQuantity'] > 0): ?>
 
-                                    <span class="text-success">
-                                        Còn hàng:
-                                        <?= (int) $product['StockQuantity'] ?>
-                                    </span>
+                                <!-- Đơn vị -->
 
-                                <?php else: ?>
+                                <?php if (!empty($product['Unit'])): ?>
 
-                                    <span class="text-danger">
-                                        Hết hàng
-                                    </span>
+                                    <div class="small text-muted">
+
+                                        Đơn vị:
+                                        <?= htmlspecialchars(
+                                            $product['Unit']
+                                        ) ?>
+
+                                    </div>
 
                                 <?php endif; ?>
 
-                            </p>
 
-                            <a
-                                href="/product-detail.php?id=<?=
-                                    (int) $product['ProductID']
-                                ?>"
-                                class="btn btn-outline-primary mt-auto"
-                            >
-                                Xem chi tiết
-                            </a>
+                                <!-- Tồn kho -->
+
+                                <div class="small mt-1">
+
+                                    <?php if (
+                                        (int) $product['StockQuantity'] > 0
+                                    ): ?>
+
+                                        <span class="text-success">
+
+                                            Còn
+                                            <?= (int) $product['StockQuantity'] ?>
+                                            sản phẩm
+
+                                        </span>
+
+                                    <?php else: ?>
+
+                                        <span class="text-danger">
+
+                                            Hết hàng
+
+                                        </span>
+
+                                    <?php endif; ?>
+
+                                </div>
+
+
+                                <!-- Xem chi tiết -->
+
+                                <a
+                                    href="/product-detail.php?id=<?= (int) $product['ProductID'] ?>"
+                                    class="btn btn-primary w-100 mt-3"
+                                >
+                                    Xem chi tiết
+                                </a>
+
+                            </div>
 
                         </div>
 
@@ -494,136 +630,122 @@ require_once '/var/www/src/includes/frontend/navbar.php';
 
                 </div>
 
-            <?php endwhile; ?>
+            <?php endforeach; ?>
 
         </div>
 
-    <?php else: ?>
 
-        <div class="alert alert-info">
+        <!-- Phân trang -->
 
-            Không tìm thấy sản phẩm phù hợp.
+        <?php if ($totalPages > 1): ?>
 
-        </div>
-
-    <?php endif; ?>
-
-    <!-- PHÂN TRANG -->
-
-    <?php if ($totalPages > 1): ?>
-
-        <nav
-            class="mt-5"
-            aria-label="Phân trang sản phẩm"
-        >
-
-            <ul
-                class="pagination
-                       justify-content-center
-                       flex-wrap"
+            <nav
+                aria-label="Phân trang sản phẩm"
+                class="mt-5"
             >
 
-                <!-- Trang trước -->
-
-                <?php
-
-                $previousQuery = http_build_query([
-                    'keyword' => $keyword,
-                    'category' => $categoryID,
-                    'page' => max(1, $page - 1)
-                ]);
-
-                ?>
-
-                <li
-                    class="page-item <?=
-                        $page <= 1
-                            ? 'disabled'
-                            : ''
-                    ?>"
+                <ul
+                    class="pagination
+                           justify-content-center"
                 >
 
-                    <a
-                        class="page-link"
-                        href="/products.php?<?= $previousQuery ?>"
-                    >
-                        &laquo; Trước
-                    </a>
-
-                </li>
-
-                <!-- Các trang -->
-
-                <?php for (
-                    $pageNumber = 1;
-                    $pageNumber <= $totalPages;
-                    $pageNumber++
-                ): ?>
-
-                    <?php
-
-                    $query = http_build_query([
-                        'keyword' => $keyword,
-                        'category' => $categoryID,
-                        'page' => $pageNumber
-                    ]);
-
-                    ?>
+                    <!-- Trang trước -->
 
                     <li
-                        class="page-item <?=
-                            $pageNumber === $page
-                                ? 'active'
-                                : ''
-                        ?>"
+                        class="page-item
+                            <?= $page <= 1
+                                ? 'disabled'
+                                : '' ?>"
                     >
 
-                        <a
-                            class="page-link"
-                            href="/products.php?<?= $query ?>"
-                        >
-                            <?= $pageNumber ?>
-                        </a>
+                        <?php if ($page > 1): ?>
+
+                            <a
+                                class="page-link"
+                                href="<?= htmlspecialchars(
+                                    buildProductUrl($page - 1)
+                                ) ?>"
+                            >
+                                Trước
+                            </a>
+
+                        <?php else: ?>
+
+                            <span class="page-link">
+                                Trước
+                            </span>
+
+                        <?php endif; ?>
 
                     </li>
 
-                <?php endfor; ?>
 
-                <!-- Trang sau -->
+                    <!-- Các trang -->
 
-                <?php
+                    <?php for (
+                        $i = 1;
+                        $i <= $totalPages;
+                        $i++
+                    ): ?>
 
-                $nextQuery = http_build_query([
-                    'keyword' => $keyword,
-                    'category' => $categoryID,
-                    'page' => min(
-                        $totalPages,
-                        $page + 1
-                    )
-                ]);
+                        <li
+                            class="page-item
+                                <?= $i === $page
+                                    ? 'active'
+                                    : '' ?>"
+                        >
 
-                ?>
+                            <a
+                                class="page-link"
+                                href="<?= htmlspecialchars(
+                                    buildProductUrl($i)
+                                ) ?>"
+                            >
 
-                <li
-                    class="page-item <?=
-                        $page >= $totalPages
-                            ? 'disabled'
-                            : ''
-                    ?>"
-                >
+                                <?= $i ?>
 
-                    <a
-                        class="page-link"
-                        href="/products.php?<?= $nextQuery ?>"
+                            </a>
+
+                        </li>
+
+                    <?php endfor; ?>
+
+
+                    <!-- Trang sau -->
+
+                    <li
+                        class="page-item
+                            <?= $page >= $totalPages
+                                ? 'disabled'
+                                : '' ?>"
                     >
-                        Sau &raquo;
-                    </a>
 
-                </li>
+                        <?php if ($page < $totalPages): ?>
 
-            </ul>
+                            <a
+                                class="page-link"
+                                href="<?= htmlspecialchars(
+                                    buildProductUrl($page + 1)
+                                ) ?>"
+                            >
+                                Sau
+                            </a>
 
-        </nav>
+                        <?php else: ?>
+
+                            <span class="page-link">
+                                Sau
+                            </span>
+
+                        <?php endif; ?>
+
+                    </li>
+
+                </ul>
+
+            </nav>
+
+        <?php endif; ?>
 
     <?php endif; ?>
 
@@ -631,7 +753,6 @@ require_once '/var/www/src/includes/frontend/navbar.php';
 
 <?php
 
-$result->free();
-$stmt->close();
-
 require_once '/var/www/src/includes/frontend/footer.php';
+
+?>
