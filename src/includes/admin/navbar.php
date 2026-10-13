@@ -28,10 +28,20 @@
             Sản phẩm
           </a>
         </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/admin/customer/">
+            Quản lý khách hàng
+          </a>
+        </li>
 
         <li class="nav-item">
           <a class="nav-link" href="/admin/orders/">
             Đơn hàng
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/admin/shippers/">
+            Vận chuyển
           </a>
         </li>
 
