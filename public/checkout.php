@@ -35,6 +35,7 @@ if ($isLoggedIn) {
         SELECT
             CustomerID,
             CustomerName,
+            Phone,
             Address
         FROM customers
         WHERE CustomerID = ?
@@ -71,6 +72,7 @@ if ($isLoggedIn) {
   }
 
   $customerName = $customer['CustomerName'];
+  $phone = $customer['Phone'];
   $address = $customer['Address'] ?? '';
 }
 
@@ -403,16 +405,14 @@ if (
                  * Cập nhật địa chỉ khách hàng
                  */
         $sqlUpdateCustomer = "
-                    UPDATE customers
-                    SET
-                        Address = ?
-                    WHERE CustomerID = ?
-                ";
+    UPDATE customers
+    SET
+        Phone = ?,
+        Address = ?
+    WHERE CustomerID = ?
+";
 
-        $stmtUpdateCustomer =
-          $conn->prepare(
-            $sqlUpdateCustomer
-          );
+        $stmtUpdateCustomer = $conn->prepare($sqlUpdateCustomer);
 
         if (!$stmtUpdateCustomer) {
           throw new Exception(
@@ -421,7 +421,8 @@ if (
         }
 
         $stmtUpdateCustomer->bind_param(
-          'si',
+          'ssi',
+          $phone,
           $address,
           $customerID
         );
@@ -435,15 +436,15 @@ if (
                  * tạo Customer mới.
                  */
         $sqlCustomer = "
-                    INSERT INTO customers (
-                        CustomerName,
-                        Address
-                    )
-                    VALUES (?, ?)
-                ";
+    INSERT INTO customers (
+        CustomerName,
+        Phone,
+        Address
+    )
+    VALUES (?, ?, ?)
+";
 
-        $stmtCustomer =
-          $conn->prepare($sqlCustomer);
+        $stmtCustomer = $conn->prepare($sqlCustomer);
 
         if (!$stmtCustomer) {
           throw new Exception(
@@ -452,15 +453,15 @@ if (
         }
 
         $stmtCustomer->bind_param(
-          'ss',
+          'sss',
           $customerName,
+          $phone,
           $address
         );
 
         $stmtCustomer->execute();
 
-        $customerID =
-          $conn->insert_id;
+        $customerID = $conn->insert_id;
 
         $stmtCustomer->close();
       }

@@ -21,7 +21,7 @@ if (!$id || $id <= 0) {
 
 // Lấy thông tin khách hàng
 $stmt = $conn->prepare(
-  'SELECT CustomerID, CustomerName, ContactName, Address,
+  'SELECT CustomerID, CustomerName, ContactName,Phone, Email, Address,
             City, PostalCode, Country
      FROM customers
      WHERE CustomerID = ?'
@@ -51,6 +51,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   } else {
     $customerName = trim($_POST['CustomerName'] ?? '');
     $contactName  = trim($_POST['ContactName'] ?? '');
+    $phone        = trim($_POST['Phone']);
+    $email        = trim($_POST['Email']);
     $address      = trim($_POST['Address'] ?? '');
     $city         = trim($_POST['City'] ?? '');
     $postalCode   = trim($_POST['PostalCode'] ?? '');
@@ -63,6 +65,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'UPDATE customers
                  SET CustomerName = ?,
                      ContactName = ?,
+                     Phone = ?,
+                     Email = ?,
                      Address = ?,
                      City = ?,
                      PostalCode = ?,
@@ -71,9 +75,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       );
 
       $stmt->bind_param(
-        'ssssssi',
+        'ssssssssi',
         $customerName,
         $contactName,
+        $phone,
+        $email,
         $address,
         $city,
         $postalCode,
@@ -97,6 +103,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Giữ dữ liệu đã nhập nếu có lỗi
     $customer['CustomerName'] = $customerName;
     $customer['ContactName'] = $contactName;
+    $customer['Phone'] = $email;
+    $customer['Email'] = $email;
     $customer['Address'] = $address;
     $customer['City'] = $city;
     $customer['PostalCode'] = $postalCode;
@@ -150,6 +158,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           $fields = [
             'CustomerName' => 'Tên khách hàng',
             'ContactName'  => 'Tên người liên hệ',
+            'Phone'        => 'Điện thoại',
+            'Email'        => 'Email',
             'Address'      => 'Địa chỉ',
             'City'         => 'Thành phố',
             'PostalCode'   => 'Mã bưu điện',
