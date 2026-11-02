@@ -44,6 +44,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $stmt->close();
   }
 }
+require_once '/var/www/src/includes/admin/header.php';
+require_once '/var/www/src/includes/admin/navbar.php';
 ?>
 <!DOCTYPE html>
 <html lang="vi">
@@ -92,3 +94,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 </html>
 <?php $conn->close(); ?>
+<?php require_once '/var/www/src/includes/admin/footer.php'; ?>

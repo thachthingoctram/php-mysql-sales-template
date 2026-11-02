@@ -111,6 +111,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $customer['Country'] = $country;
   }
 }
+require_once '/var/www/src/includes/admin/header.php';
+require_once '/var/www/src/includes/admin/navbar.php';
+
 ?>
 
 <!DOCTYPE html>
@@ -206,3 +209,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </body>
 
 </html>
+<?php require_once '/var/www/src/includes/admin/footer.php'; ?>

@@ -6,11 +6,12 @@ $pageTitle = 'Dashboard Admin';
 
 function e($value): string
 {
-  return htmlspecialchars(
-    (string) ($value ?? ''),
-    ENT_QUOTES,
-    'UTF-8'
-  );
+  return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+}
+
+function money($value): string
+{
+  return number_format((float)$value, 0, ',', '.') . ' đ';
 }
 
 function getCount(mysqli $conn, string $sql): int
@@ -18,105 +19,82 @@ function getCount(mysqli $conn, string $sql): int
   $result = $conn->query($sql);
 
   if (!$result) {
+    error_log('Dashboard count query error: ' . $conn->error);
     return 0;
   }
 
   $row = $result->fetch_row();
-
-  return (int) ($row[0] ?? 0);
+  return (int)($row[0] ?? 0);
 }
 
-function money($value): string
-{
-  return number_format((float) $value, 0, ',', '.') . ' đ';
-}
+/* =========================
+   THỐNG KÊ TỔNG QUAN
+========================= */
+$totalProducts = getCount($conn, "SELECT COUNT(*) FROM products");
+$activeProducts = getCount($conn, "SELECT COUNT(*) FROM products WHERE IsActive = 1");
+$totalCustomers = getCount($conn, "SELECT COUNT(*) FROM customers");
+$totalOrders = getCount($conn, "SELECT COUNT(*) FROM orders");
+$newOrders = getCount($conn, "SELECT COUNT(*) FROM orders WHERE Status = 'Pending'");
 
-/*
- * 1. Thống kê tổng quan
- */
-$totalProducts = getCount(
-  $conn,
-  "SELECT COUNT(*) FROM products"
-);
-
-$activeProducts = getCount(
-  $conn,
-  "SELECT COUNT(*) FROM products WHERE IsActive = 1"
-);
-
-$totalCustomers = getCount(
-  $conn,
-  "SELECT COUNT(*) FROM customers"
-);
-
-$totalOrders = getCount(
-  $conn,
-  "SELECT COUNT(*) FROM orders"
-);
-
-$newOrders = getCount(
-  $conn,
-  "SELECT COUNT(*) FROM orders WHERE Status = 'Pending'"
-);
-
-$completedOrders = getCount(
-  $conn,
-  "SELECT COUNT(*) FROM orders WHERE Status = 'Completed'"
-);
-
-$cancelledOrders = getCount(
-  $conn,
-  "SELECT COUNT(*) FROM orders WHERE Status = 'Cancelled'"
-);
-
-/*
- * 2. Doanh thu hôm nay và tháng này.
- * Chỉ tính đơn hàng đã hoàn thành.
- * Doanh thu được tính từ chi tiết đơn hàng.
- */
-$sqlRevenue = "
-    SELECT
-        COALESCE(
-            SUM(
-                CASE
-                    WHEN DATE(o.OrderDate) = CURDATE()
-                    THEN od.Quantity * od.UnitPrice
-                    ELSE 0
-                END
-            ),
-            0
-        ) AS TodayRevenue,
-
-        COALESCE(
-            SUM(
-                CASE
-                    WHEN YEAR(o.OrderDate) = YEAR(CURDATE())
-                     AND MONTH(o.OrderDate) = MONTH(CURDATE())
-                    THEN od.Quantity * od.UnitPrice
-                    ELSE 0
-                END
-            ),
-            0
-        ) AS MonthRevenue
-
+/* =========================
+   TỔNG DOANH THU
+   Tính theo tất cả trạng thái
+========================= */
+$sqlTotalRevenue = "
+    SELECT COALESCE(SUM(od.Quantity * od.UnitPrice), 0) AS TotalRevenue
     FROM orders o
-    LEFT JOIN orderdetail od
-        ON od.OrderID = o.OrderID
-    WHERE o.Status = 'Completed'
+    LEFT JOIN orderdetail od ON od.OrderID = o.OrderID
 ";
 
-$revenueResult = $conn->query($sqlRevenue);
+$resultTotalRevenue = $conn->query($sqlTotalRevenue);
+$totalRevenue = 0;
 
-$revenue = $revenueResult
-  ? $revenueResult->fetch_assoc()
-  : ['TodayRevenue' => 0, 'MonthRevenue' => 0];
+if ($resultTotalRevenue) {
+  $row = $resultTotalRevenue->fetch_assoc();
+  $totalRevenue = (float)($row['TotalRevenue'] ?? 0);
+} else {
+  error_log('Dashboard total revenue query error: ' . $conn->error);
+}
 
-$todayRevenue = (float) ($revenue['TodayRevenue'] ?? 0);
-$monthRevenue = (float) ($revenue['MonthRevenue'] ?? 0);
+/* =========================
+   DOANH THU HÔM NAY VÀ THÁNG NÀY
+========================= */
+$sqlRevenue = "
+    SELECT
+        COALESCE(SUM(
+            CASE
+                WHEN DATE(o.OrderDate) = CURDATE()
+                THEN od.Quantity * od.UnitPrice
+                ELSE 0
+            END
+        ), 0) AS TodayRevenue,
 
-/*
- * 3. Đơn hàng gần đây
- */
+        COALESCE(SUM(
+            CASE
+                WHEN YEAR(o.OrderDate) = YEAR(CURDATE())
+                 AND MONTH(o.OrderDate) = MONTH(CURDATE())
+                THEN od.Quantity * od.UnitPrice
+                ELSE 0
+            END
+        ), 0) AS MonthRevenue
+    FROM orders o
+    LEFT JOIN orderdetail od ON od.OrderID = o.OrderID
+";
+
+$resultRevenue = $conn->query($sqlRevenue);
+
+$todayRevenue = 0;
+$monthRevenue = 0;
+
+if ($resultRevenue) {
+  $revenue = $resultRevenue->fetch_assoc();
+  $todayRevenue = (float)($revenue['TodayRevenue'] ?? 0);
+  $monthRevenue = (float)($revenue['MonthRevenue'] ?? 0);
+}
+
+/* =========================
+   ĐƠN HÀNG GẦN ĐÂY
+========================= */
 $sqlRecentOrders = "
     SELECT
         o.OrderID,
@@ -124,80 +102,67 @@ $sqlRecentOrders = "
         o.Status,
         c.CustomerName,
         c.Phone,
-        COALESCE(
-            SUM(od.Quantity * od.UnitPrice),
-            0
-        ) AS OrderTotal
-
+        COALESCE(SUM(od.Quantity * od.UnitPrice), 0) AS OrderTotal
     FROM orders o
-
-    LEFT JOIN customers c
-        ON c.CustomerID = o.CustomerID
-
-    LEFT JOIN orderdetail od
-        ON od.OrderID = o.OrderID
-
+    LEFT JOIN customers c ON c.CustomerID = o.CustomerID
+    LEFT JOIN orderdetail od ON od.OrderID = o.OrderID
     GROUP BY
         o.OrderID,
         o.OrderDate,
         o.Status,
         c.CustomerName,
         c.Phone
-
     ORDER BY o.OrderDate DESC, o.OrderID DESC
     LIMIT 6
 ";
 
 $recentOrders = $conn->query($sqlRecentOrders);
 
-/*
- * 4. Sản phẩm sắp hết hàng
- */
+if (!$recentOrders) {
+  error_log('Dashboard recent orders query error: ' . $conn->error);
+}
+
+/* =========================
+   SẢN PHẨM SẮP HẾT HÀNG
+========================= */
 $sqlLowStock = "
-    SELECT
-        ProductID,
-        ProductCode,
-        ProductName,
-        StockQuantity
+    SELECT ProductID, ProductCode, ProductName, StockQuantity
     FROM products
-    WHERE IsActive = 1
-      AND StockQuantity <= 5
+    WHERE IsActive = 1 AND StockQuantity <= 5
     ORDER BY StockQuantity ASC
     LIMIT 6
 ";
 
 $lowStockProducts = $conn->query($sqlLowStock);
 
-/*
- * 5. Dữ liệu doanh thu 7 ngày gần nhất
- */
+if (!$lowStockProducts) {
+  error_log('Dashboard low stock query error: ' . $conn->error);
+}
+
+/* =========================
+   BIỂU ĐỒ DOANH THU 7 NGÀY
+/* Doanh thu 7 ngày gần nhất */
 $sqlChart = "
     SELECT
         DATE(o.OrderDate) AS RevenueDate,
         SUM(od.Quantity * od.UnitPrice) AS Revenue
-
     FROM orders o
-
-    INNER JOIN orderdetail od
-        ON od.OrderID = o.OrderID
-
-    WHERE o.Status = 'Completed'
-      AND o.OrderDate >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+    INNER JOIN orderdetail od ON od.OrderID = o.OrderID
+    WHERE o.OrderDate >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
       AND o.OrderDate < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
-
     GROUP BY DATE(o.OrderDate)
-    ORDER BY RevenueDate ASC
+    ORDER BY RevenueDate
 ";
 
 $chartResult = $conn->query($sqlChart);
-
 $revenueByDate = [];
 
 if ($chartResult) {
   while ($row = $chartResult->fetch_assoc()) {
-    $revenueByDate[$row['RevenueDate']] =
-      (float) $row['Revenue'];
+    $revenueByDate[$row['RevenueDate']] = (float)$row['Revenue'];
   }
+} else {
+  error_log('Dashboard chart query error: ' . $conn->error);
 }
 
 $chartLabels = [];
@@ -205,16 +170,13 @@ $chartValues = [];
 
 for ($i = 6; $i >= 0; $i--) {
   $date = date('Y-m-d', strtotime("-{$i} days"));
-
   $chartLabels[] = date('d/m', strtotime($date));
   $chartValues[] = $revenueByDate[$date] ?? 0;
 }
 
-$maxRevenue = max($chartValues ?: [0]);
-
-/*
- * 6. Trạng thái đơn hàng
- */
+/* =========================
+   BIỂU ĐỒ TRẠNG THÁI ĐƠN HÀNG
+========================= */
 $statusLabels = [
   'Pending'   => 'Chờ xử lý',
   'Confirmed' => 'Đã xác nhận',
@@ -231,603 +193,469 @@ $statusClasses = [
   'Cancelled' => 'cancelled'
 ];
 
+$statusValues = [];
+
+foreach ($statusLabels as $status => $label) {
+  $escapedStatus = $conn->real_escape_string($status);
+
+  $statusValues[] = getCount(
+    $conn,
+    "SELECT COUNT(*) FROM orders WHERE Status = '{$escapedStatus}'"
+  );
+}
+
+$statusChartLabels = array_values($statusLabels);
+
+/* Header chỉ mở HTML và tải Bootstrap; không include navbar.php */
 require_once '/var/www/src/includes/admin/header.php';
 require_once '/var/www/src/includes/admin/navbar.php';
 ?>
 
+<link rel="stylesheet"
+  href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <style>
-  .dashboard-page {
-    padding-bottom: 32px;
-    color: #243047;
+  .dashboard-content {
+    min-height: 100vh;
+    padding: 28px;
+    background: linear-gradient(135deg, #eaf4ff 0%, #f4f8ff 50%, #e6f0ff 100%);
+    color: #1e293b;
   }
 
-  .dashboard-heading {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 24px;
+  .dashboard-content h2,
+  .dashboard-content h5 {
+    letter-spacing: -0.3px;
   }
 
-  .dashboard-heading h1 {
-    font-size: 28px;
-    font-weight: 750;
-    margin: 0 0 6px;
-  }
-
-  .dashboard-heading p {
-    color: #748094;
-    margin: 0;
-  }
-
-  .dashboard-date {
-    color: #64748b;
+  .dashboard-content .stat-card,
+  .dashboard-content .dashboard-panel {
+    border: 1px solid #edf0f5;
+    border-radius: 16px;
     background: #fff;
-    border: 1px solid #e5eaf1;
-    padding: 10px 14px;
-    border-radius: 10px;
-    white-space: nowrap;
   }
 
-  .dashboard-stats {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 16px;
-    margin-bottom: 22px;
+  .dashboard-content .stat-card {
+    transition: transform .2s ease, box-shadow .2s ease;
   }
 
-  .dashboard-card,
-  .dashboard-panel {
-    background: #fff;
-    border: 1px solid #e8edf3;
-    border-radius: 15px;
-    box-shadow: 0 4px 18px rgba(31, 45, 61, .04);
+  .dashboard-content .stat-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 25px rgba(15, 23, 42, .08);
   }
 
-  .dashboard-card {
-    padding: 20px;
-  }
-
-  .dashboard-card-label {
-    font-size: 14px;
-    color: #758197;
-    margin-bottom: 12px;
-  }
-
-  .dashboard-card-value {
-    font-size: 27px;
-    font-weight: 750;
-    line-height: 1.3;
-    overflow-wrap: anywhere;
-  }
-
-  .dashboard-card-note {
-    color: #758197;
-    font-size: 12px;
-    margin-top: 9px;
-  }
-
-  .dashboard-card.teal {
-    border-top: 3px solid #0d9488;
-  }
-
-  .dashboard-card.blue {
-    border-top: 3px solid #3b82f6;
-  }
-
-  .dashboard-card.purple {
-    border-top: 3px solid #8b5cf6;
-  }
-
-  .dashboard-card.orange {
-    border-top: 3px solid #f59e0b;
-  }
-
-  .dashboard-main-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr);
-    gap: 20px;
-    margin-bottom: 22px;
-  }
-
-  .dashboard-panel {
-    padding: 22px;
-    min-width: 0;
-  }
-
-  .dashboard-panel h2 {
-    font-size: 17px;
-    font-weight: 700;
-    margin: 0;
-  }
-
-  .dashboard-panel-subtitle {
-    color: #8290a4;
-    font-size: 13px;
-    margin-top: 6px;
-  }
-
-  .chart {
-    height: 230px;
+  .dashboard-content .stat-icon {
     display: flex;
-    align-items: stretch;
-    gap: 12px;
-    margin-top: 28px;
-    padding-top: 10px;
-    border-bottom: 1px solid #e7edf4;
-  }
-
-  .chart-column {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
     align-items: center;
-    justify-content: flex-end;
-    gap: 9px;
-  }
-
-  .chart-bar-area {
-    flex: 1;
-    width: 100%;
-    display: flex;
-    align-items: flex-end;
     justify-content: center;
-    min-height: 0;
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    font-size: 22px;
   }
 
-  .chart-bar {
-    width: min(38px, 75%);
-    min-height: 3px;
-    border-radius: 7px 7px 0 0;
-    background: linear-gradient(180deg, #2dd4bf, #0d9488);
+  .dashboard-content .dashboard-panel {
+    overflow: hidden;
   }
 
-  .chart-label {
-    font-size: 12px;
-    color: #8290a4;
-    padding-bottom: 8px;
+  .dashboard-content .table {
+    margin-bottom: 0;
   }
 
-  .chart-value {
-    font-size: 11px;
+  .dashboard-content .table thead th {
+    padding: 14px 16px;
     color: #64748b;
-    text-align: center;
-    overflow-wrap: anywhere;
-  }
-
-  .status-list {
-    display: grid;
-    gap: 18px;
-    margin-top: 25px;
-  }
-
-  .status-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .status-name {
-    color: #64748b;
-    font-size: 14px;
-  }
-
-  .status-number {
-    font-weight: 700;
-  }
-
-  .dashboard-table-wrap {
-    width: 100%;
-    overflow-x: auto;
-    margin-top: 18px;
-  }
-
-  .dashboard-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-  }
-
-  .dashboard-table th {
-    color: #8490a3;
-    font-weight: 600;
     background: #f8fafc;
-    white-space: nowrap;
-  }
-
-  .dashboard-table th,
-  .dashboard-table td {
-    padding: 13px 12px;
-    text-align: left;
-    border-bottom: 1px solid #edf1f5;
-  }
-
-  .dashboard-table tbody tr:last-child td {
-    border-bottom: 0;
-  }
-
-  .dashboard-table td {
-    color: #46536a;
-  }
-
-  .dashboard-table strong {
-    color: #26344b;
-  }
-
-  .dashboard-badge {
-    display: inline-block;
-    padding: 5px 9px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 650;
-    white-space: nowrap;
-  }
-
-  .dashboard-badge.pending {
-    background: #fff4d6;
-    color: #9a6700;
-  }
-
-  .dashboard-badge.confirmed {
-    background: #dbeafe;
-    color: #1d4ed8;
-  }
-
-  .dashboard-badge.shipping {
-    background: #ede9fe;
-    color: #6d28d9;
-  }
-
-  .dashboard-badge.completed {
-    background: #dcfce7;
-    color: #166534;
-  }
-
-  .dashboard-badge.cancelled {
-    background: #fee2e2;
-    color: #b91c1c;
-  }
-
-  .dashboard-shortcuts {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
-    margin-bottom: 22px;
-  }
-
-  .dashboard-shortcut {
-    display: block;
-    text-decoration: none;
-    color: #344258;
-    background: #fff;
-    border: 1px solid #e8edf3;
-    border-radius: 12px;
-    padding: 17px;
-    transition: border-color .2s, transform .2s;
-  }
-
-  .dashboard-shortcut:hover {
-    color: #0f766e;
-    border-color: #5eead4;
-    transform: translateY(-2px);
-  }
-
-  .dashboard-shortcut strong {
-    display: block;
-    margin-bottom: 5px;
-  }
-
-  .dashboard-shortcut span {
     font-size: 12px;
-    color: #8490a3;
-  }
-
-  .dashboard-empty {
-    text-align: center !important;
-    color: #94a3b8 !important;
-    padding: 24px !important;
-  }
-
-  .dashboard-stock-low {
-    color: #dc2626 !important;
     font-weight: 700;
+    text-transform: uppercase;
+    white-space: nowrap;
+    border-bottom: 1px solid #edf0f5;
   }
 
-  @media (max-width: 1100px) {
-    .dashboard-stats {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .dashboard-main-grid {
-      grid-template-columns: 1fr;
-    }
+  .dashboard-content .table tbody td {
+    padding: 16px;
+    border-color: #f1f5f9;
+    vertical-align: middle;
   }
 
-  @media (max-width: 600px) {
-    .dashboard-heading {
-      align-items: flex-start;
-      flex-direction: column;
+  .dashboard-content .table tbody tr:hover {
+    background: #f8fafc;
+  }
+
+  .dashboard-content .btn-outline-primary {
+    border-radius: 9px;
+  }
+
+  .dashboard-content .text-secondary {
+    color: #64748b !important;
+  }
+
+  .dashboard-content .chart-container {
+    position: relative;
+    height: 300px;
+    width: 100%;
+  }
+
+  @media (max-width: 768px) {
+    .dashboard-content {
+      padding: 16px;
     }
 
-    .dashboard-stats {
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-
-    .dashboard-card {
-      padding: 14px;
-    }
-
-    .dashboard-card-value {
-      font-size: 21px;
-    }
-
-    .dashboard-panel {
-      padding: 15px;
-    }
-
-    .dashboard-shortcuts {
-      grid-template-columns: 1fr;
+    .dashboard-content .chart-container {
+      height: 260px;
     }
   }
 </style>
 
-<div class="dashboard-page">
+<div class="container-fluid dashboard-content">
 
-  <div class="dashboard-heading">
+  <!-- Tiêu đề -->
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
     <div>
-      <h1>Dashboard Admin</h1>
-      <p>Tổng quan hoạt động kinh doanh mỹ phẩm.</p>
+      <h2 class="fw-bold text-dark mb-1">Dashboard</h2>
+      <p class="text-secondary mb-0">
+        Tổng quan hoạt động kinh doanh của cửa hàng
+      </p>
     </div>
 
-    <div class="dashboard-date">
+    <span class="badge bg-white text-secondary border p-2">
+      <i class="bi bi-calendar3 me-1"></i>
       <?= e(date('d/m/Y')) ?>
-    </div>
+    </span>
   </div>
 
   <!-- Thẻ thống kê -->
-  <div class="dashboard-stats">
+  <div class="row g-4 mb-4">
 
-    <div class="dashboard-card teal">
-      <div class="dashboard-card-label">Tổng sản phẩm</div>
-      <div class="dashboard-card-value">
-        <?= number_format($totalProducts) ?>
-      </div>
-      <div class="dashboard-card-note">
-        <?= number_format($activeProducts) ?> sản phẩm đang bán
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="card stat-card shadow-sm h-100">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <span class="text-secondary">Tổng sản phẩm</span>
+            <div class="stat-icon bg-primary bg-opacity-10 text-primary">
+              <i class="bi bi-box-seam"></i>
+            </div>
+          </div>
+          <h3 class="fw-bold mb-1"><?= number_format($totalProducts) ?></h3>
+          <small class="text-secondary">
+            <?= number_format($activeProducts) ?> sản phẩm đang hoạt động
+          </small>
+        </div>
       </div>
     </div>
 
-    <div class="dashboard-card blue">
-      <div class="dashboard-card-label">Tổng đơn hàng</div>
-      <div class="dashboard-card-value">
-        <?= number_format($totalOrders) ?>
-      </div>
-      <div class="dashboard-card-note">
-        <?= number_format($newOrders) ?> đơn đang chờ xử lý
-      </div>
-    </div>
-
-    <div class="dashboard-card purple">
-      <div class="dashboard-card-label">Khách hàng</div>
-      <div class="dashboard-card-value">
-        <?= number_format($totalCustomers) ?>
-      </div>
-      <div class="dashboard-card-note">
-        Tổng khách hàng đã lưu
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="card stat-card shadow-sm h-100">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <span class="text-secondary">Đơn hàng</span>
+            <div class="stat-icon bg-success bg-opacity-10 text-success">
+              <i class="bi bi-receipt"></i>
+            </div>
+          </div>
+          <h3 class="fw-bold mb-1"><?= number_format($totalOrders) ?></h3>
+          <small class="text-secondary">
+            <?= number_format($newOrders) ?> đơn đang chờ xử lý
+          </small>
+        </div>
       </div>
     </div>
 
-    <div class="dashboard-card orange">
-      <div class="dashboard-card-label">Doanh thu tháng này</div>
-      <div class="dashboard-card-value">
-        <?= money($monthRevenue) ?>
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="card stat-card shadow-sm h-100">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <span class="text-secondary">Khách hàng</span>
+            <div class="stat-icon bg-warning bg-opacity-10 text-warning">
+              <i class="bi bi-people"></i>
+            </div>
+          </div>
+          <h3 class="fw-bold mb-1"><?= number_format($totalCustomers) ?></h3>
+          <small class="text-secondary">Khách hàng trong hệ thống</small>
+        </div>
       </div>
-      <div class="dashboard-card-note">
-        Hôm nay: <?= money($todayRevenue) ?>
+    </div>
+
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="card stat-card shadow-sm h-100">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <span class="text-secondary">Tổng giá trị đơn hàng</span>
+            <div class="stat-icon bg-info bg-opacity-10 text-info">
+              <i class="bi bi-currency-dollar"></i>
+            </div>
+          </div>
+          <h3 class="fw-bold mb-1"><?= money($totalRevenue) ?></h3>
+          <small class="text-secondary">Tất cả trạng thái đơn hàng</small>
+        </div>
       </div>
     </div>
 
   </div>
 
-  <!-- Truy cập nhanh -->
-  <div class="dashboard-shortcuts">
-    <a class="dashboard-shortcut" href="/admin/products/index.php">
-      <strong>Quản lý sản phẩm</strong>
-      <span>Thêm, sửa và cập nhật tồn kho</span>
-    </a>
+  <!-- Biểu đồ -->
+  <div class="row g-4 mb-4">
 
-    <a class="dashboard-shortcut" href="/admin/orders/index.php">
-      <strong>Quản lý đơn hàng</strong>
-      <span>Xem và xử lý đơn hàng</span>
-    </a>
-
-    <a class="dashboard-shortcut" href="/admin/customer/index.php">
-      <strong>Quản lý khách hàng</strong>
-      <span>Xem và chỉnh sửa thông tin khách hàng</span>
-    </a>
-  </div>
-
-  <!-- Biểu đồ và trạng thái đơn hàng -->
-  <div class="dashboard-main-grid">
-
-    <section class="dashboard-panel">
-      <h2>Doanh thu 7 ngày gần nhất</h2>
-      <div class="dashboard-panel-subtitle">
-        Chỉ tính các đơn hàng đã hoàn thành
-      </div>
-
-      <div class="chart">
-        <?php foreach ($chartValues as $index => $value): ?>
-          <?php
-          $height = $maxRevenue > 0
-            ? ($value / $maxRevenue) * 100
-            : 0;
-          ?>
-          <div class="chart-column">
-            <div class="chart-value">
-              <?= $value > 0
-                ? e(number_format($value, 0, ',', '.'))
-                : '0' ?>
-            </div>
-
-            <div class="chart-bar-area">
-              <div
-                class="chart-bar"
-                style="height: <?= (float) $height ?>%">
-              </div>
-            </div>
-
-            <div class="chart-label">
-              <?= e($chartLabels[$index]) ?>
-            </div>
+    <div class="col-12 col-xl-8">
+      <div class="card dashboard-panel shadow-sm h-100">
+        <div class="card-body p-4">
+          <h5 class="fw-bold mb-1">Doanh thu</h5>
+          <p class="text-secondary small mb-4">
+            Tổng giá trị đơn hàng theo ngày trong 7 ngày gần nhất
+          </p>
+          <div class="chart-container">
+            <canvas id="revenueChart"></canvas>
           </div>
-        <?php endforeach; ?>
+        </div>
       </div>
-    </section>
+    </div>
 
-    <section class="dashboard-panel">
-      <h2>Tình hình đơn hàng</h2>
-      <div class="dashboard-panel-subtitle">
-        Tổng số đơn theo từng trạng thái
-      </div>
-
-      <div class="status-list">
-        <?php foreach ($statusLabels as $status => $label): ?>
-          <?php
-          $count = getCount(
-            $conn,
-            "SELECT COUNT(*) FROM orders WHERE Status = '"
-              . $conn->real_escape_string($status)
-              . "'"
-          );
-          ?>
-          <div class="status-row">
-            <span class="status-name">
-              <?= e($label) ?>
-            </span>
-            <span class="status-number">
-              <?= number_format($count) ?>
-            </span>
+    <div class="col-12 col-xl-4">
+      <div class="card dashboard-panel shadow-sm h-100">
+        <div class="card-body p-4">
+          <h5 class="fw-bold mb-1">Trạng thái đơn hàng</h5>
+          <p class="text-secondary small mb-4">
+            Thống kê số lượng đơn theo trạng thái
+          </p>
+          <div class="chart-container">
+            <canvas id="orderStatusChart"></canvas>
           </div>
-        <?php endforeach; ?>
+        </div>
       </div>
-    </section>
+    </div>
 
   </div>
 
   <!-- Đơn hàng gần đây -->
-  <section class="dashboard-panel" style="margin-bottom: 22px;">
-    <h2>Đơn hàng gần đây</h2>
-    <div class="dashboard-panel-subtitle">
-      Các đơn hàng mới được ghi nhận trong hệ thống
-    </div>
+  <div class="card dashboard-panel shadow-sm mb-4">
+    <div class="card-body p-4">
+      <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+        <div>
+          <h5 class="fw-bold mb-1">Đơn hàng gần đây</h5>
+          <p class="text-secondary small mb-0">
+            Theo dõi các đơn hàng mới nhất
+          </p>
+        </div>
 
-    <div class="dashboard-table-wrap">
-      <table class="dashboard-table">
-        <thead>
-          <tr>
-            <th>Mã đơn</th>
-            <th>Khách hàng</th>
-            <th>Điện thoại</th>
-            <th>Ngày đặt</th>
-            <th>Tổng tiền</th>
-            <th>Trạng thái</th>
-          </tr>
-        </thead>
+        <a href="/admin/orders/" class="btn btn-outline-primary btn-sm">
+          Xem tất cả
+        </a>
+      </div>
 
-        <tbody>
-          <?php if ($recentOrders && $recentOrders->num_rows > 0): ?>
-            <?php while ($order = $recentOrders->fetch_assoc()): ?>
-              <?php
-              $status = $order['Status'] ?? '';
-              $statusLabel = $statusLabels[$status] ?? $status;
-              $statusClass = $statusClasses[$status] ?? '';
-              ?>
+      <div class="table-responsive">
+        <table class="table align-middle table-hover">
+          <thead>
+            <tr>
+              <th>Mã đơn</th>
+              <th>Khách hàng</th>
+              <th>Ngày đặt</th>
+              <th>Tổng tiền</th>
+              <th>Trạng thái</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php if ($recentOrders && $recentOrders->num_rows > 0): ?>
+              <?php while ($order = $recentOrders->fetch_assoc()): ?>
+                <?php
+                $status = (string)($order['Status'] ?? '');
+                $statusLabel = $statusLabels[$status] ?? $status;
+                $statusClass = $statusClasses[$status] ?? 'secondary';
+                ?>
+                <tr>
+                  <td class="fw-semibold">
+                    #<?= e($order['OrderID']) ?>
+                  </td>
+                  <td>
+                    <div class="fw-semibold">
+                      <?= e($order['CustomerName'] ?? 'Khách hàng') ?>
+                    </div>
+                    <small class="text-secondary">
+                      <?= e($order['Phone'] ?? '') ?>
+                    </small>
+                  </td>
+                  <td><?= e($order['OrderDate'] ?? '') ?></td>
+                  <td class="fw-semibold">
+                    <?= money($order['OrderTotal'] ?? 0) ?>
+                  </td>
+                  <td>
+                    <span class="badge bg-primary bg-opacity-10 text-primary">
+                      <?= e($statusLabel) ?>
+                    </span>
+                  </td>
+                </tr>
+              <?php endwhile; ?>
+            <?php else: ?>
               <tr>
-                <td>
-                  <strong>
-                    #<?= (int) $order['OrderID'] ?>
-                  </strong>
-                </td>
-                <td><?= e($order['CustomerName'] ?? 'Khách hàng') ?></td>
-                <td><?= e($order['Phone'] ?? '') ?></td>
-                <td>
-                  <?= e(
-                    $order['OrderDate']
-                      ? date(
-                        'd/m/Y',
-                        strtotime($order['OrderDate'])
-                      )
-                      : ''
-                  ) ?>
-                </td>
-                <td>
-                  <?= money($order['OrderTotal']) ?>
-                </td>
-                <td>
-                  <span class="dashboard-badge <?= e($statusClass) ?>">
-                    <?= e($statusLabel) ?>
-                  </span>
+                <td colspan="5" class="text-center text-secondary py-4">
+                  Chưa có dữ liệu đơn hàng.
                 </td>
               </tr>
-            <?php endwhile; ?>
-          <?php else: ?>
-            <tr>
-              <td colspan="6" class="dashboard-empty">
-                Chưa có đơn hàng nào.
-              </td>
-            </tr>
-          <?php endif; ?>
-        </tbody>
-      </table>
+            <?php endif; ?>
+          </tbody>
+        </table>
+      </div>
     </div>
-  </section>
+  </div>
 
   <!-- Sản phẩm sắp hết hàng -->
-  <section class="dashboard-panel">
-    <h2>Sản phẩm sắp hết hàng</h2>
-    <div class="dashboard-panel-subtitle">
-      Sản phẩm đang bán có số lượng tồn kho không quá 5
-    </div>
+  <div class="card dashboard-panel shadow-sm">
+    <div class="card-body p-4">
+      <h5 class="fw-bold mb-1">Sản phẩm sắp hết hàng</h5>
+      <p class="text-secondary small mb-3">
+        Các sản phẩm cần được kiểm tra và bổ sung tồn kho
+      </p>
 
-    <div class="dashboard-table-wrap">
-      <table class="dashboard-table">
-        <thead>
-          <tr>
-            <th>Mã sản phẩm</th>
-            <th>Tên sản phẩm</th>
-            <th>Tồn kho</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          <?php if ($lowStockProducts && $lowStockProducts->num_rows > 0): ?>
-            <?php while ($product = $lowStockProducts->fetch_assoc()): ?>
+      <div class="table-responsive">
+        <table class="table align-middle table-hover">
+          <thead>
+            <tr>
+              <th>Mã sản phẩm</th>
+              <th>Tên sản phẩm</th>
+              <th>Số lượng tồn</th>
+              <th>Tình trạng</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php if ($lowStockProducts && $lowStockProducts->num_rows > 0): ?>
+              <?php while ($product = $lowStockProducts->fetch_assoc()): ?>
+                <tr>
+                  <td><?= e($product['ProductCode'] ?? '') ?></td>
+                  <td class="fw-medium">
+                    <?= e($product['ProductName'] ?? '') ?>
+                  </td>
+                  <td><?= number_format((int)($product['StockQuantity'] ?? 0)) ?></td>
+                  <td>
+                    <span class="badge bg-danger bg-opacity-10 text-danger">
+                      Sắp hết hàng
+                    </span>
+                  </td>
+                </tr>
+              <?php endwhile; ?>
+            <?php else: ?>
               <tr>
-                <td><?= e($product['ProductCode'] ?? $product['ProductID']) ?></td>
-                <td><?= e($product['ProductName']) ?></td>
-                <td class="dashboard-stock-low">
-                  <?= number_format((int) $product['StockQuantity']) ?>
+                <td colspan="4" class="text-center text-secondary py-4">
+                  Không có sản phẩm sắp hết hàng.
                 </td>
               </tr>
-            <?php endwhile; ?>
-          <?php else: ?>
-            <tr>
-              <td colspan="3" class="dashboard-empty">
-                Không có sản phẩm nào sắp hết hàng.
-              </td>
-            </tr>
-          <?php endif; ?>
-        </tbody>
-      </table>
+            <?php endif; ?>
+          </tbody>
+        </table>
+      </div>
     </div>
-  </section>
+  </div>
 
 </div>
 
-<?php
-require_once '/var/www/src/includes/admin/footer.php';
-?>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const revenueLabels = <?= json_encode($chartLabels, JSON_UNESCAPED_UNICODE) ?>;
+    const revenueData = <?= json_encode(array_map(
+                          fn($value) => round($value / 1000000, 2),
+                          $chartValues
+                        ), JSON_UNESCAPED_UNICODE) ?>;
+
+    const orderStatusLabels = <?= json_encode(
+                                array_values($statusLabels),
+                                JSON_UNESCAPED_UNICODE
+                              ) ?>;
+    const orderStatusData = <?= json_encode($statusValues, JSON_UNESCAPED_UNICODE) ?>;
+    if (typeof Chart === 'undefined') {
+      console.error('Không tải được Chart.js. Hãy kiểm tra kết nối mạng.');
+      return;
+    }
+
+    const revenueCanvas = document.getElementById('revenueChart');
+
+    if (revenueCanvas) {
+      new Chart(revenueCanvas, {
+        type: 'line',
+        data: {
+          labels: revenueLabels,
+          datasets: [{
+            label: 'Doanh thu',
+            data: revenueData,
+            borderColor: '#3B82F6',
+            backgroundColor: 'rgba(59, 130, 246, 0.12)',
+            fill: true,
+            tension: 0.35,
+            borderWidth: 3,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            pointBackgroundColor: '#3B82F6',
+            spanGaps: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              min: 0,
+              max: 100,
+              ticks: {
+                stepSize: 10,
+                callback: function(value) {
+                  return value === 0 ? '0' : value + ' triệu';
+                }
+              }
+            }
+          },
+
+        }
+      });
+    }
+
+    const statusCanvas = document.getElementById('orderStatusChart');
+
+    if (statusCanvas) {
+      new Chart(statusCanvas, {
+        type: 'doughnut',
+        data: {
+          labels: orderStatusLabels,
+          datasets: [{
+            data: orderStatusData,
+            backgroundColor: [
+              '#3B82F6',
+              '#F59E0B',
+              '#10B981',
+              '#EF4444',
+              '#8B5CF6'
+            ],
+            borderColor: '#ffffff',
+            borderWidth: 3,
+            hoverOffset: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '65%',
+          plugins: {
+            legend: {
+              position: 'bottom'
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return context.label + ': ' + context.parsed + ' đơn';
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    console.log('Dashboard chart data:', {
+      revenueLabels,
+      revenueData,
+      orderStatusLabels,
+      orderStatusData
+    });
+  });
+</script>
+
+<?php require_once '/var/www/src/includes/admin/footer.php'; ?>
