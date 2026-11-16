@@ -21,6 +21,10 @@ $customerID = null;
 $customerName = '';
 $phone = '';
 $address = '';
+$city = '';
+$postalCode = '';
+$country = '';
+$email = '';
 $errorMessage = '';
 
 /*
@@ -32,14 +36,18 @@ if ($isLoggedIn) {
   $customerID = (int) $_SESSION['customer_id'];
 
   $sqlCustomer = "
-        SELECT
-            CustomerID,
-            CustomerName,
-            Phone,
-            Address
-        FROM customers
-        WHERE CustomerID = ?
-    ";
+    SELECT
+        CustomerID,
+        CustomerName,
+        Phone,
+        Address,
+        City,
+        PostalCode,
+        Country,
+        Email
+    FROM customers
+    WHERE CustomerID = ?
+";
 
   $stmtCustomer = $conn->prepare($sqlCustomer);
 
@@ -74,6 +82,10 @@ if ($isLoggedIn) {
   $customerName = $customer['CustomerName'];
   $phone = $customer['Phone'];
   $address = $customer['Address'] ?? '';
+  $city = $customer['City'] ?? '';
+  $postalCode = $customer['PostalCode'] ?? '';
+  $country = $customer['Country'] ?? '';
+  $email = $customer['Email'] ?? '';
 }
 
 
@@ -193,11 +205,11 @@ if (
      */
   if ($isLoggedIn) {
 
-    $phone =
-      trim($_POST['phone'] ?? '');
-
-    $address =
-      trim($_POST['address'] ?? '');
+    $phone = trim($_POST['phone'] ?? '');
+    $address = trim($_POST['address'] ?? '');
+    $city = trim($_POST['city'] ?? '');
+    $postalCode = trim($_POST['postal_code'] ?? '');
+    $country = trim($_POST['country'] ?? '');
   } else {
 
     /*
@@ -219,16 +231,19 @@ if (
      */
   if (!$isLoggedIn && $customerName === '') {
 
-    $errorMessage =
-      'Vui lòng nhập họ và tên.';
+    $errorMessage = 'Vui lòng nhập họ và tên.';
   } elseif ($phone === '') {
 
-    $errorMessage =
-      'Vui lòng nhập số điện thoại.';
+    $errorMessage = 'Vui lòng nhập số điện thoại.';
   } elseif ($address === '') {
 
-    $errorMessage =
-      'Vui lòng nhập địa chỉ.';
+    $errorMessage = 'Vui lòng nhập địa chỉ.';
+  } elseif ($city === '') {
+
+    $errorMessage = 'Vui lòng nhập thành phố.';
+  } elseif ($country === '') {
+
+    $errorMessage = 'Vui lòng nhập quốc gia.';
   } else {
 
     try {
@@ -408,7 +423,10 @@ if (
     UPDATE customers
     SET
         Phone = ?,
-        Address = ?
+        Address = ?,
+        City = ?,
+        PostalCode = ?,
+        Country = ?
     WHERE CustomerID = ?
 ";
 
@@ -421,9 +439,12 @@ if (
         }
 
         $stmtUpdateCustomer->bind_param(
-          'ssi',
+          'sssssi',
           $phone,
           $address,
+          $city,
+          $postalCode,
+          $country,
           $customerID
         );
 
@@ -439,9 +460,12 @@ if (
     INSERT INTO customers (
         CustomerName,
         Phone,
-        Address
+        Address,
+        City,
+        PostalCode,
+        Country
     )
-    VALUES (?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?)
 ";
 
         $stmtCustomer = $conn->prepare($sqlCustomer);
@@ -453,10 +477,13 @@ if (
         }
 
         $stmtCustomer->bind_param(
-          'sss',
+          'ssssss',
           $customerName,
           $phone,
-          $address
+          $address,
+          $city,
+          $postalCode,
+          $country
         );
 
         $stmtCustomer->execute();
@@ -774,6 +801,49 @@ require_once
                             $address
                           ) ?></textarea>
 
+            </div>
+            <!-- Thành phố -->
+            <div class="mb-3">
+              <label for="city" class="form-label">
+                Thành phố
+              </label>
+
+              <input
+                type="text"
+                class="form-control"
+                id="city"
+                name="city"
+                value="<?= htmlspecialchars($city) ?>"
+                required>
+            </div>
+
+            <!-- Mã bưu chính -->
+            <div class="mb-3">
+              <label for="postal_code" class="form-label">
+                Mã bưu chính
+              </label>
+
+              <input
+                type="text"
+                class="form-control"
+                id="postal_code"
+                name="postal_code"
+                value="<?= htmlspecialchars($postalCode) ?>">
+            </div>
+
+            <!-- Quốc gia -->
+            <div class="mb-3">
+              <label for="country" class="form-label">
+                Quốc gia
+              </label>
+
+              <input
+                type="text"
+                class="form-control"
+                id="country"
+                name="country"
+                value="<?= htmlspecialchars($country) ?>"
+                required>
             </div>
 
 

@@ -5,13 +5,37 @@ require_once '/var/www/src/config/database.php';
 
 $pageTitle = 'Trang chủ';
 
+function e($value): string
+{
+  return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+}
+
+/**
+ * Chuẩn hóa đường dẫn ảnh.
+ * Database có thể lưu "/uploads/products/a.jpg" hoặc chỉ "a.jpg".
+ */
+function productImageUrl(?string $file): string
+{
+  $file = (string)$file;
+
+  if ($file === '') {
+    return '';
+  }
+
+  if (strpos($file, '/uploads/products/') !== 0) {
+    $file = '/uploads/products/' . ltrim($file, '/');
+  }
+
+  return $file;
+}
+
 require_once '/var/www/src/includes/frontend/header.php';
 require_once '/var/www/src/includes/frontend/navbar.php';
 
 
 /*
 |--------------------------------------------------------------------------
-| Lấy danh mục sản phẩm
+| Lấy danh mục sản phẩm (kèm số sản phẩm đang bán)
 |--------------------------------------------------------------------------
 */
 
@@ -19,11 +43,17 @@ $categories = [];
 
 $categorySql = "
     SELECT
-        CategoryID,
-        CategoryName,
-        Description
-    FROM categories
-    ORDER BY CategoryName ASC
+        c.CategoryID,
+        c.CategoryName,
+        c.Description,
+        (
+            SELECT COUNT(*)
+            FROM products p
+            WHERE p.CategoryID = c.CategoryID
+              AND p.IsActive = 1
+        ) AS ProductCount
+    FROM categories c
+    ORDER BY c.CategoryName ASC
 ";
 
 $categoryResult = $conn->query($categorySql);
@@ -32,12 +62,17 @@ if ($categoryResult) {
   while ($row = $categoryResult->fetch_assoc()) {
     $categories[] = $row;
   }
+} else {
+  error_log('Home categories query error: ' . $conn->error);
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| Lấy sản phẩm
+| Lấy sản phẩm mới nhất
+|
+| Ảnh lấy bằng truy vấn con để mỗi sản phẩm chỉ xuất hiện 1 lần,
+| ưu tiên ảnh chính; nếu chưa đặt ảnh chính thì lấy ảnh đầu tiên.
 |--------------------------------------------------------------------------
 */
 
@@ -54,20 +89,18 @@ $productSql = "
         p.StockQuantity,
         p.CategoryID,
         c.CategoryName,
-        pi.ImageFile
+        (
+            SELECT pi.ImageFile
+            FROM product_images pi
+            WHERE pi.ProductID = p.ProductID
+            ORDER BY pi.IsPrimary DESC, pi.SortOrder ASC, pi.ProductImageID ASC
+            LIMIT 1
+        ) AS ImageFile
     FROM products p
-
     LEFT JOIN categories c
         ON p.CategoryID = c.CategoryID
-
-    LEFT JOIN product_images pi
-        ON p.ProductID = pi.ProductID
-        AND pi.IsPrimary = 1
-
     WHERE p.IsActive = 1
-
     ORDER BY p.ProductID DESC
-
     LIMIT 8
 ";
 
@@ -77,268 +110,303 @@ if ($productResult) {
   while ($row = $productResult->fetch_assoc()) {
     $products[] = $row;
   }
+} else {
+  error_log('Home products query error: ' . $conn->error);
+}
+
+// Ảnh thật của sản phẩm để minh họa ở banner (tối đa 3).
+$heroImages = [];
+
+foreach ($products as $product) {
+  if (!empty($product['ImageFile']) && count($heroImages) < 3) {
+    $heroImages[] = [
+      'src' => productImageUrl($product['ImageFile']),
+      'alt' => $product['ProductName'],
+    ];
+  }
 }
 
 ?>
 
-<style>
-  /* =========================================================
-   TRANG CHỦ
-========================================================= */
+<link
+  href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap"
+  rel="stylesheet">
+<link
+  href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+  rel="stylesheet">
 
-  .home-page {
-    width: 100%;
-    min-height: calc(100vh - 120px);
-    background: #f5f6f8;
-    padding: 30px 50px 50px;
+<style>
+  :root {
+    --brand: #0E7C66;
+    --brand-dark: #0A5F4F;
+    --brand-soft: #E3F3EE;
+    --ink: #16212B;
+    --muted: #5F6B78;
+    --line: #E3E8ED;
+    --surface: #FFFFFF;
+    --page: #F3F5F7;
+    --hero: #12302B;
+    --accent: #F2B84B;
   }
 
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: 'Be Vietnam Pro', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  .home-page {
+    padding-top: 1.75rem;
+    padding-bottom: 3rem;
+  }
 
   /* =========================================================
-   BANNER
-========================================================= */
+     BANNER
+  ========================================================= */
 
   .hero {
-    width: 100%;
-    min-height: 280px;
-
-    border-radius: 16px;
-
-    background: linear-gradient(135deg,
-        #2563eb 0%,
-        #1d4ed8 50%,
-        #1e40af 100%);
-
-    color: white;
-
     display: flex;
     align-items: center;
     justify-content: space-between;
-
-    padding: 45px 60px;
-    margin-bottom: 30px;
-
+    gap: 2rem;
+    margin-bottom: 2rem;
+    padding: 3rem 3.5rem;
+    min-height: 320px;
+    border-radius: 20px;
+    background: var(--hero);
+    color: #fff;
     overflow: hidden;
   }
 
   .hero-content {
-    max-width: 650px;
+    max-width: 540px;
+  }
+
+  .hero-label {
+    display: inline-block;
+    margin-bottom: 1.1rem;
+    padding: .4rem .9rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .12);
+    color: #CFEBE3;
+    font-size: .85rem;
+    font-weight: 600;
   }
 
   .hero-content h1 {
-    font-size: 42px;
-    font-weight: 700;
-    margin-bottom: 15px;
+    margin: 0 0 1rem;
+    font-size: 2.6rem;
+    font-weight: 800;
+    letter-spacing: -.025em;
+    line-height: 1.2;
   }
 
   .hero-content p {
-    font-size: 18px;
-    line-height: 1.6;
-    margin-bottom: 25px;
-    opacity: 0.95;
+    margin: 0 0 1.75rem;
+    color: #BFD6D0;
+    font-size: 1.02rem;
+    line-height: 1.7;
   }
 
   .hero-button {
-    display: inline-block;
-
-    background: white;
-    color: #1d4ed8;
-
-    padding: 12px 25px;
-
-    border-radius: 8px;
-
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .8rem 1.5rem;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #2B2108;
+    font-weight: 700;
     text-decoration: none;
-
-    font-weight: 600;
-
-    transition: 0.2s;
+    transition: background .2s ease;
   }
 
-  .hero-button:hover {
-    background: #f1f5f9;
-    color: #1e40af;
+  .hero-button:hover,
+  .hero-button:focus-visible {
+    background: #F8CC78;
+    color: #2B2108;
   }
 
-  .hero-icon {
-    font-size: 130px;
-    opacity: 0.18;
-    margin-right: 60px;
+  /* Ảnh sản phẩm / biểu tượng ở banner */
+
+  .hero-visual {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-shrink: 0;
   }
 
+  .hero-tile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 130px;
+    height: 150px;
+    border-radius: 18px;
+    background: #fff;
+    overflow: hidden;
+  }
+
+  .hero-tile img {
+    width: 100%;
+    height: 100%;
+    padding: .75rem;
+    object-fit: contain;
+  }
+
+  .hero-tile.is-icon {
+    background: rgba(255, 255, 255, .1);
+    border: 1px solid rgba(255, 255, 255, .2);
+    color: #fff;
+    font-size: 2.6rem;
+  }
+
+  .hero-tile:nth-child(2) {
+    transform: translateY(-1.25rem);
+  }
+
+  .hero-tile:nth-child(3) {
+    transform: translateY(.75rem);
+  }
 
   /* =========================================================
-   NỘI DUNG CHÍNH
-========================================================= */
+     NỘI DUNG CHÍNH
+  ========================================================= */
 
   .home-content {
     display: grid;
-    grid-template-columns: 250px 1fr;
-    gap: 30px;
+    grid-template-columns: 250px minmax(0, 1fr);
+    gap: 2rem;
+    align-items: start;
   }
 
-
-  /* =========================================================
-   DANH MỤC
-========================================================= */
+  /* Danh mục */
 
   .category-box {
-    background: white;
-
-    border-radius: 14px;
-
-    padding: 22px;
-
-    height: fit-content;
-
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    padding: 1.4rem;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--surface);
   }
 
   .category-title {
-    font-size: 20px;
+    margin-bottom: 1rem;
+    font-size: 1.05rem;
     font-weight: 700;
-
-    margin-bottom: 18px;
-
-    color: #1f2937;
   }
 
   .category-list {
-    list-style: none;
-
-    padding: 0;
     margin: 0;
+    padding: 0;
+    list-style: none;
   }
 
-  .category-list li {
-    margin-bottom: 8px;
+  .category-list li+li {
+    margin-top: .25rem;
   }
 
   .category-list a {
-    display: block;
-
-    padding: 11px 13px;
-
-    border-radius: 8px;
-
-    color: #374151;
-
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    padding: .65rem .8rem;
+    border-radius: 10px;
+    color: var(--ink);
+    font-size: .94rem;
+    font-weight: 500;
     text-decoration: none;
-
-    transition: 0.2s;
+    transition: background .2s ease, color .2s ease;
   }
 
-  .category-list a:hover {
-    background: #eff6ff;
-    color: #2563eb;
+  .category-list a:hover,
+  .category-list a:focus-visible {
+    background: var(--brand-soft);
+    color: var(--brand-dark);
   }
 
-
-  /* =========================================================
-   SẢN PHẨM
-========================================================= */
-
-  .products-section {
-    min-width: 0;
+  .category-count {
+    min-width: 1.7rem;
+    padding: .1rem .5rem;
+    border-radius: 999px;
+    background: #EEF1F4;
+    color: var(--muted);
+    font-size: .76rem;
+    font-weight: 600;
+    text-align: center;
   }
+
+  /* Tiêu đề khu sản phẩm */
 
   .section-header {
     display: flex;
-
-    justify-content: space-between;
     align-items: center;
-
-    margin-bottom: 20px;
+    justify-content: space-between;
+    margin-bottom: 1.25rem;
   }
 
   .section-header h2 {
     margin: 0;
-
-    font-size: 26px;
+    font-size: 1.5rem;
     font-weight: 700;
-
-    color: #1f2937;
+    letter-spacing: -.02em;
   }
 
   .view-all {
-    color: #2563eb;
-
-    text-decoration: none;
-
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    color: var(--brand);
     font-weight: 600;
+    text-decoration: none;
   }
 
-  .view-all:hover {
+  .view-all:hover,
+  .view-all:focus-visible {
+    color: var(--brand-dark);
     text-decoration: underline;
   }
 
-
   /* =========================================================
-   PRODUCT GRID
-========================================================= */
+     LƯỚI SẢN PHẨM
+  ========================================================= */
 
   .product-grid {
     display: grid;
-
     grid-template-columns: repeat(4, minmax(0, 1fr));
-
-    gap: 20px;
+    gap: 1.1rem;
   }
 
-
-  /* =========================================================
-   PRODUCT CARD
-========================================================= */
-
   .product-card {
-    background: white;
-
-    border-radius: 14px;
-
-    overflow: hidden;
-
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-
-    transition: 0.25s;
-
     display: flex;
     flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--surface);
+    overflow: hidden;
+    transition: border-color .2s ease;
   }
 
   .product-card:hover {
-    transform: translateY(-4px);
-
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.10);
+    border-color: #B9C6CF;
   }
 
-
-  /* =========================================================
-   HÌNH SẢN PHẨM
-========================================================= */
-
   .product-image {
-    width: 100%;
-    height: 210px;
-
-    background: #f8fafc;
-
+    position: relative;
     display: flex;
-
-    justify-content: center;
     align-items: center;
-
+    justify-content: center;
+    height: 200px;
+    background: #F6F8FA;
     overflow: hidden;
   }
 
   .product-image img {
     width: 100%;
     height: 100%;
-
+    padding: 1rem;
     object-fit: contain;
-
-    padding: 15px;
-
-    transition: 0.25s;
+    transition: transform .3s ease;
   }
 
   .product-card:hover .product-image img {
@@ -346,216 +414,177 @@ if ($productResult) {
   }
 
   .no-image {
-    color: #9ca3af;
-    font-size: 14px;
+    color: #9AA5B1;
+    font-size: .85rem;
   }
 
+  .product-flag {
+    position: absolute;
+    top: .7rem;
+    left: .7rem;
+    padding: .25rem .65rem;
+    border-radius: 999px;
+    font-size: .74rem;
+    font-weight: 600;
+  }
 
-  /* =========================================================
-   THÔNG TIN SẢN PHẨM
-========================================================= */
+  .flag-out {
+    background: #FEE2E2;
+    color: #991B1B;
+  }
+
+  .flag-low {
+    background: #FEF3C7;
+    color: #92400E;
+  }
 
   .product-info {
-    padding: 17px;
-
     display: flex;
-    flex-direction: column;
-
     flex: 1;
+    flex-direction: column;
+    padding: 1rem 1.05rem 1.1rem;
   }
 
   .product-category {
-    font-size: 13px;
-
-    color: #6b7280;
-
-    margin-bottom: 7px;
+    margin-bottom: .35rem;
+    color: var(--muted);
+    font-size: .8rem;
   }
 
   .product-name {
-    font-size: 17px;
-
-    font-weight: 600;
-
-    color: #1f2937;
-
-    margin: 0 0 10px;
-
     display: -webkit-box;
-
-    -webkit-line-clamp: 2;
-
-    -webkit-box-orient: vertical;
-
+    min-height: 2.8em;
+    margin: 0 0 .7rem;
     overflow: hidden;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.4;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
 
-    min-height: 48px;
+  .product-name a {
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .product-name a:hover,
+  .product-name a:focus-visible {
+    color: var(--brand);
   }
 
   .product-price {
-    font-size: 19px;
-
+    margin-bottom: .3rem;
+    font-size: 1.2rem;
     font-weight: 700;
-
-    color: #dc2626;
-
-    margin-bottom: 8px;
+    letter-spacing: -.01em;
+    font-variant-numeric: tabular-nums;
   }
 
   .product-stock {
-    font-size: 13px;
-
-    color: #6b7280;
-
-    margin-bottom: 15px;
+    margin-bottom: 1rem;
+    color: var(--muted);
+    font-size: .82rem;
   }
 
   .btn-detail {
     display: block;
-
-    width: 100%;
-
-    text-align: center;
-
-    background: #2563eb;
-
-    color: white;
-
-    padding: 10px;
-
-    border-radius: 8px;
-
-    text-decoration: none;
-
-    font-weight: 600;
-
     margin-top: auto;
-
-    transition: 0.2s;
+    padding: .6rem;
+    border: 1px solid var(--brand);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--brand);
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+    transition: background .2s ease, color .2s ease;
   }
 
-  .btn-detail:hover {
-    background: #1d4ed8;
-
-    color: white;
+  .btn-detail:hover,
+  .btn-detail:focus-visible {
+    background: var(--brand);
+    color: #fff;
   }
-
-
-  /* =========================================================
-   KHÔNG CÓ SẢN PHẨM
-========================================================= */
 
   .empty-products {
-    background: white;
-
-    border-radius: 14px;
-
-    padding: 50px;
-
+    padding: 3rem;
+    border: 1px dashed var(--line);
+    border-radius: 16px;
+    background: var(--surface);
+    color: var(--muted);
     text-align: center;
-
-    color: #6b7280;
   }
 
-
   /* =========================================================
-   RESPONSIVE
-========================================================= */
+     RESPONSIVE
+  ========================================================= */
 
   @media (max-width: 1200px) {
-
     .product-grid {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
-
   }
 
   @media (max-width: 992px) {
+    .hero {
+      padding: 2.25rem;
+    }
 
-    .home-page {
-      padding: 25px;
+    .hero-visual {
+      display: none;
     }
 
     .home-content {
-      grid-template-columns: 210px 1fr;
+      grid-template-columns: 210px minmax(0, 1fr);
+      gap: 1.5rem;
     }
 
     .product-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
-
-    .hero {
-      padding: 35px;
-    }
-
-    .hero-icon {
-      display: none;
-    }
-
   }
 
   @media (max-width: 768px) {
-
-    .home-page {
-      padding: 20px 15px;
-    }
-
     .home-content {
       grid-template-columns: 1fr;
     }
 
-    .category-box {
-      width: 100%;
-    }
-
     .category-list {
       display: grid;
-
       grid-template-columns: repeat(2, 1fr);
-
-      gap: 5px;
+      gap: .25rem;
     }
 
-    .category-list li {
-      margin: 0;
+    .category-list li+li {
+      margin-top: 0;
     }
 
     .hero {
       min-height: 230px;
-
-      padding: 30px;
+      padding: 1.75rem;
     }
 
     .hero-content h1 {
-      font-size: 30px;
+      font-size: 1.9rem;
     }
-
-    .hero-content p {
-      font-size: 16px;
-    }
-
   }
 
   @media (max-width: 480px) {
 
-    .product-grid {
-      grid-template-columns: 1fr;
-    }
-
+    .product-grid,
     .category-list {
       grid-template-columns: 1fr;
     }
 
     .hero-content h1 {
-      font-size: 26px;
+      font-size: 1.65rem;
     }
-
   }
 </style>
 
 
-<main class="home-page">
-
+<main class="container home-page">
 
   <!-- =====================================================
          BANNER
@@ -565,27 +594,42 @@ if ($productResult) {
 
     <div class="hero-content">
 
+      <span class="hero-label">
+        Công nghệ hiện đại
+      </span>
+
       <h1>
-        Chào mừng đến với Sales Store
+        Khám phá thế giới<br>
+        thiết bị điện tử
       </h1>
 
       <p>
-        Khám phá các sản phẩm chất lượng với nhiều lựa chọn
-        phù hợp với nhu cầu của bạn.
+        Laptop, điện thoại, máy tính và phụ kiện công nghệ.
+        Đa dạng sản phẩm, đáp ứng mọi nhu cầu của bạn.
       </p>
 
       <a href="/products.php" class="hero-button">
-        Xem tất cả sản phẩm
+        Khám phá ngay
+        <i class="bi bi-arrow-right"></i>
       </a>
 
     </div>
 
-    <div class="hero-icon">
-      🛍
+    <div class="hero-visual" aria-hidden="true">
+      <?php if (!empty($heroImages)): ?>
+        <?php foreach ($heroImages as $image): ?>
+          <div class="hero-tile">
+            <img src="<?= e($image['src']) ?>" alt="" loading="lazy">
+          </div>
+        <?php endforeach; ?>
+      <?php else: ?>
+        <div class="hero-tile is-icon"><i class="bi bi-laptop"></i></div>
+        <div class="hero-tile is-icon"><i class="bi bi-phone"></i></div>
+        <div class="hero-tile is-icon"><i class="bi bi-headphones"></i></div>
+      <?php endif; ?>
     </div>
 
   </section>
-
 
   <!-- =====================================================
          DANH MỤC + SẢN PHẨM
@@ -594,9 +638,7 @@ if ($productResult) {
   <div class="home-content">
 
 
-    <!-- =================================================
-             DANH MỤC
-        ================================================== -->
+    <!-- DANH MỤC -->
 
     <aside class="category-box">
 
@@ -611,14 +653,12 @@ if ($productResult) {
           <?php foreach ($categories as $category): ?>
 
             <li>
-
               <a
-                href="/products.php?category=<?= urlencode($category['CategoryID']) ?>">
-
-                <?= htmlspecialchars($category['CategoryName']) ?>
-
+                href="/products.php?category=<?= urlencode($category['CategoryID']) ?>"
+                title="<?= e($category['Description'] ?? '') ?>">
+                <span><?= e($category['CategoryName']) ?></span>
+                <span class="category-count"><?= (int)$category['ProductCount'] ?></span>
               </a>
-
             </li>
 
           <?php endforeach; ?>
@@ -626,7 +666,7 @@ if ($productResult) {
         <?php else: ?>
 
           <li>
-            <span style="color:#9ca3af;">
+            <span class="text-secondary">
               Chưa có danh mục
             </span>
           </li>
@@ -638,22 +678,19 @@ if ($productResult) {
     </aside>
 
 
-    <!-- =================================================
-             DANH SÁCH SẢN PHẨM
-        ================================================== -->
+    <!-- DANH SÁCH SẢN PHẨM -->
 
     <section class="products-section">
 
       <div class="section-header">
 
         <h2>
-          Sản phẩm nổi bật
+          Sản phẩm mới nhất
         </h2>
 
-        <a
-          href="/products.php"
-          class="view-all">
-          Xem tất cả →
+        <a href="/products.php" class="view-all">
+          Xem tất cả
+          <i class="bi bi-arrow-right"></i>
         </a>
 
       </div>
@@ -665,49 +702,23 @@ if ($productResult) {
 
           <?php foreach ($products as $product): ?>
 
-            <article class="product-card">
+            <?php
+            $stock = (int)$product['StockQuantity'];
+            $detailUrl = '/product-detail.php?id=' . (int)$product['ProductID'];
+            $imageUrl = productImageUrl($product['ImageFile'] ?? '');
+            ?>
 
+            <article class="product-card">
 
               <!-- HÌNH -->
 
               <div class="product-image">
 
-                <?php if (!empty($product['ImageFile'])): ?>
-
-                  <?php
-
-                  $imageFile = $product['ImageFile'];
-
-                  /*
-                                     * Nếu database lưu:
-                                     * /uploads/products/iphone.jpg
-                                     *
-                                     * thì dùng trực tiếp.
-                                     *
-                                     * Nếu database chỉ lưu:
-                                     * iphone.jpg
-                                     *
-                                     * thì thêm:
-                                     * /uploads/products/
-                                     */
-
-                  if (
-                    strpos(
-                      $imageFile,
-                      '/uploads/products/'
-                    ) !== 0
-                  ) {
-
-                    $imageFile =
-                      '/uploads/products/' .
-                      ltrim($imageFile, '/');
-                  }
-
-                  ?>
+                <?php if ($imageUrl !== ''): ?>
 
                   <img
-                    src="<?= htmlspecialchars($imageFile) ?>"
-                    alt="<?= htmlspecialchars($product['ProductName']) ?>"
+                    src="<?= e($imageUrl) ?>"
+                    alt="<?= e($product['ProductName']) ?>"
                     loading="lazy">
 
                 <?php else: ?>
@@ -718,6 +729,12 @@ if ($productResult) {
 
                 <?php endif; ?>
 
+                <?php if ($stock <= 0): ?>
+                  <span class="product-flag flag-out">Hết hàng</span>
+                <?php elseif ($stock <= 5): ?>
+                  <span class="product-flag flag-low">Sắp hết hàng</span>
+                <?php endif; ?>
+
               </div>
 
 
@@ -725,68 +742,33 @@ if ($productResult) {
 
               <div class="product-info">
 
-
                 <?php if (!empty($product['CategoryName'])): ?>
-
                   <div class="product-category">
-
-                    <?= htmlspecialchars(
-                      $product['CategoryName']
-                    ) ?>
-
+                    <?= e($product['CategoryName']) ?>
                   </div>
-
                 <?php endif; ?>
 
-
                 <h3 class="product-name">
-
-                  <?= htmlspecialchars(
-                    $product['ProductName']
-                  ) ?>
-
+                  <a href="<?= e($detailUrl) ?>">
+                    <?= e($product['ProductName']) ?>
+                  </a>
                 </h3>
 
-
                 <div class="product-price">
-
-                  <?= number_format(
-                    (float)$product['Price'],
-                    0,
-                    ',',
-                    '.'
-                  ) ?>
-
-                  đ
-
+                  <?= number_format((float)$product['Price'], 0, ',', '.') ?> đ
                 </div>
-
 
                 <div class="product-stock">
-
-                  <?php if (
-                    (int)$product['StockQuantity'] > 0
-                  ): ?>
-
-                    Còn
-                    <?= (int)$product['StockQuantity'] ?>
-                    sản phẩm
-
+                  <?php if ($stock > 0): ?>
+                    Còn <?= $stock ?> sản phẩm
                   <?php else: ?>
-
-                    Hết hàng
-
+                    Tạm thời hết hàng
                   <?php endif; ?>
-
                 </div>
 
-
-                <a
-                  href="/product-detail.php?id=<?= (int)$product['ProductID'] ?>"
-                  class="btn-detail">
+                <a href="<?= e($detailUrl) ?>" class="btn-detail">
                   Xem sản phẩm
                 </a>
-
 
               </div>
 
@@ -799,9 +781,7 @@ if ($productResult) {
       <?php else: ?>
 
         <div class="empty-products">
-
           Chưa có sản phẩm để hiển thị.
-
         </div>
 
       <?php endif; ?>

@@ -94,6 +94,7 @@ CREATE TABLE orders (
     CustomerID INT NOT NULL,
     EmployeeID INT NOT NULL,
     ShipperID INT NOT NULL,
+    Status VARCHAR(20) NOT NULL DEFAULT 'Pending',
 
     CONSTRAINT fk_orders_customer
         FOREIGN KEY (CustomerID) REFERENCES customers(CustomerID),
